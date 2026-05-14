@@ -1,0 +1,7 @@
+ml-intern/.env
+
+# Temporary files
+~$*
+.ipynb_checkpoints/
+__pycache__/
+*.pyc

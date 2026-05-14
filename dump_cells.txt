@@ -1,0 +1,652 @@
+--- Cell 30 ---
+from datetime import datetime, timedelta
+import time
+
+# ── Time range ────────────────────────────────────────────────────────────────
+DAYS_BACK        = 365
+TS_REQUEST_DELAY = 0.05
+TS_LIMIT         = 365
+TS_AGG           = 'NONE'
+
+now_ms   = int(datetime.utcnow().timestamp() * 1000)
+start_ms = int((datetime.utcnow() - timedelta(days=DAYS_BACK)).timestamp() * 1000)
+
+print(f'✅ Time-series config:')
+print(f'   Period     : {DAYS_BACK} days')
+print(f'   From       : {datetime.utcfromtimestamp(start_ms/1000).strftime("%Y-%m-%d %H:%M")} UTC')
+print(f'   To         : {datetime.utcfromtimestamp(now_ms/1000).strftime("%Y-%m-%d %H:%M")} UTC')
+print(f'   Limit/key  : {TS_LIMIT} points')
+print(f'   Aggregation: {TS_AGG}')
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ACTUAL TELEMETRY KEYS — sourced from:
+#   • Confirmed telemetry key list (user-provided)
+#   • Dexter HMS ThingsBoard Telemetry Format Spec v1.0:
+#       §3  Voltage & Current  → battery_voltage, ac_voltage, system_current
+#       §4  System Status      → statusbox_* keys
+#       §5  Heartbeat          → heartbeat_* keys
+#       §7  GPS                → lat, lon
+# NOTE: Server attribute keys (nvrStatus, hddStatus, fasStatus, etc.) are
+#       NOT time-series; they live in SERVER_SCOPE and cannot be fetched here.
+# ══════════════════════════════════════════════════════════════════════════════
+
+TS_KEYS_GROUP1 = [
+    # § Confirmed telemetry keys
+    'Total_Data_Usage',
+    'BAS_Downtime_Minutes',
+    'cavlidata_ontime',
+    'sw_state',
+    'target_sw_tag',
+    'target_sw_title',
+    'target_sw_version',
+    'target_sw_ts',
+]
+
+TS_KEYS_GROUP2 = [
+    # § System Status (sendData2TBSystemStatus) — spec §4
+    'statusbox_system_on',
+    'statusbox_system_healthy',
+    'statusbox_mains_on',
+    'statusbox_battery_reverse',
+    'statusbox_battery_low',
+    'statusbox_sos_status',
+    'statusbox_network',
+    'statusbox_no_of_connected_device',
+]
+
+TS_KEYS_GROUP3 = [
+    # § Voltage & Current (flat dict) — spec §3
+    'battery_voltage',
+    'ac_voltage',
+    'system_current',
+    # § GPS — spec §7
+    'lat',
+    'lon',
+    'arrLat',
+    'arrLon',
+]
+
+TS_KEYS_GROUP4 = [
+    # § Periodic Heartbeat (HeartbeatManager) — spec §5
+    # Values: "online" | "offline"  — omitted if subsystem not integrated
+    'heartbeat_BAS',
+    'heartbeat_FAS',
+    'heartbeat_CCTV',
+    'heartbeat_access_control',
+    'heartbeat_time_lock',
+]
+
+ALL_TS_KEY_GROUPS = [TS_KEYS_GROUP1, TS_KEYS_GROUP2, TS_KEYS_GROUP3, TS_KEYS_GROUP4]
+ALL_TS_KEYS       = [k for grp in ALL_TS_KEY_GROUPS for k in grp]
+
+print(f'\n   Total TS keys to fetch : {len(ALL_TS_KEYS)}')
+print(f'   Split into {len(ALL_TS_KEY_GROUPS)} request groups')
+print()
+print('   Group 1 — User telemetry keys     :', TS_KEYS_GROUP1)
+print('   Group 2 — statusbox_* (sys status):', TS_KEYS_GROUP2)
+print('   Group 3 — Voltage/Current/GPS     :', TS_KEYS_GROUP3)
+print('   Group 4 — Heartbeat subsystems    :', TS_KEYS_GROUP4)
+
+
+--- Cell 32 ---
+from tqdm import tqdm
+
+def fetch_ts_group(device_id, keys, start_ms, end_ms, limit=365, agg='NONE'):
+    """
+    Fetch time-series for a list of keys for one device.
+    Returns dict: { key: [ {ts: epoch_ms, value: ...}, ... ] }
+    Handles pagination automatically if limit > 1000.
+    """
+    result   = {}
+    keys_str = ','.join(keys)
+    url = (
+        f'{TB_HOST}/api/plugins/telemetry/DEVICE/{device_id}/values/timeseries'
+        f'?keys={keys_str}'
+        f'&startTs={start_ms}'
+        f'&endTs={end_ms}'
+        f'&limit={limit}'
+        f'&orderBy=ASC'
+        f'&agg={agg}'
+        f'&useStrictDataTypes=false'
+    )
+    try:
+        r = session.get(url, headers=AUTH_HEADERS, timeout=30)
+        if r.status_code == 200:
+            for key, entries in r.json().items():
+                result[key] = entries or []
+        elif r.status_code == 401:
+            raise Exception('JWT expired — re-run Cell 3')
+        else:
+            result['_error'] = f'HTTP {r.status_code}'
+    except Exception as e:
+        result['_error'] = str(e)
+    return result
+
+
+# ── Main fetch loop ────────────────────────────────────────────────────────────
+print(f'📡 Fetching 365-day time-series for {len(all_devices)} devices ...')
+print(f'   {len(ALL_TS_KEY_GROUPS)} API calls per device = {len(all_devices)*len(ALL_TS_KEY_GROUPS)} total calls')
+print(f'   Estimated time: {len(all_devices)*len(ALL_TS_KEY_GROUPS)*TS_REQUEST_DELAY/60:.1f} min (without server latency)\n')
+
+raw_ts    = {}   # device_id → { key → list of {ts, value} }
+ts_errors = []
+
+for device in tqdm(all_devices, desc='TS Fetch', unit='device'):
+    dev_id   = device.get('id',{}).get('id','')
+    dev_name = device.get('name','UNKNOWN')
+    dev_ts   = {}
+
+    for group in ALL_TS_KEY_GROUPS:
+        try:
+            chunk = fetch_ts_group(
+                dev_id, group,
+                start_ms, now_ms,
+                limit=TS_LIMIT, agg=TS_AGG
+            )
+            for key, entries in chunk.items():
+                if key != '_error':
+                    dev_ts[key] = entries
+                else:
+                    ts_errors.append(f'{dev_name}: {entries}')
+        except Exception as e:
+            ts_errors.append(f'{dev_name}: {e}')
+        time.sleep(TS_REQUEST_DELAY)
+
+    raw_ts[dev_id] = dev_ts
+
+# Summary
+total_points = sum(
+    len(entries)
+    for dev in raw_ts.values()
+    for entries in dev.values()
+)
+print(f'\n✅ Time-series fetched:')
+print(f'   Devices     : {len(raw_ts)}')
+print(f'   Total points: {total_points:,}')
+print(f'   Errors       : {len(ts_errors)}')
+if ts_errors:
+    for e in ts_errors[:5]: print(f'   ⚠️  {e}')
+
+# Show sample for first device
+sample_dev_id = list(raw_ts.keys())[0]
+sample_name   = all_devices[0].get('name','?')
+print(f'\nSample — {sample_name}:')
+for key, entries in list(raw_ts[sample_dev_id].items())[:6]:
+    n = len(entries)
+    if n > 0:
+        first_ts = epoch_ms(entries[0]['ts'])
+        last_ts  = epoch_ms(entries[-1]['ts'])
+        print(f'   {key:<30} {n:>4} points  [{first_ts} → {last_ts}]')
+
+
+--- Cell 34 ---
+import pandas as pd
+from datetime import datetime, timedelta
+
+# ── Build date grid ────────────────────────────────────────────────────────────
+date_range = pd.date_range(
+    start = datetime.utcnow() - timedelta(days=DAYS_BACK),
+    end   = datetime.utcnow(),
+    freq  = 'D'
+)
+date_strs = [d.strftime('%Y-%m-%d') for d in date_range]
+print(f'Daily grid: {len(date_strs)} days  ({date_strs[0]} → {date_strs[-1]})')
+
+
+def ts_entries_to_daily(entries, date_strs):
+    """
+    Convert a list of {ts, value} points to a dict {date_str: value}.
+    Uses forward-fill: last known value carries to next day if no new reading.
+    """
+    if not entries:
+        return {d: None for d in date_strs}
+
+    # Sort ascending
+    sorted_pts = sorted(entries, key=lambda x: x['ts'])
+
+    # Build date → latest value on that day
+    day_map = {}
+    for pt in sorted_pts:
+        day = datetime.utcfromtimestamp(pt['ts']/1000).strftime('%Y-%m-%d')
+        day_map[day] = pt['value']   # last value of the day wins
+
+    # Forward fill across our date grid
+    result   = {}
+    last_val = None
+    for d in date_strs:
+        if d in day_map:
+            last_val = day_map[d]
+        result[d] = last_val
+    return result
+
+
+# ── Build long-format rows ─────────────────────────────────────────────────────
+print(f'\n⚙️  Aligning {len(raw_ts)} devices × {len(date_strs)} days to daily grid ...')
+
+# Build device_id → hierarchy lookup from existing device_df
+hier_lookup = (
+    device_df.set_index('device_id')[
+        ['bank_name','ho_name','nbg_name','lho_name','zo_name','ro_name',
+         'co_name','rbo_name','branch_name','branch_code',
+         'full_path','hierarchy_depth','device_name',
+         'device_type','customer_name','nvr_brand']
+    ].to_dict(orient='index')
+    if 'device_id' in device_df.columns else {}
+)
+
+ts_rows = []
+skipped = 0
+
+for dev_id, dev_ts in tqdm(raw_ts.items(), desc='Aligning', unit='device'):
+
+    # Daily series for each key
+    daily = {}
+    for key in ALL_TS_KEYS:
+        entries    = dev_ts.get(key, [])
+        daily[key] = ts_entries_to_daily(entries, date_strs)
+
+    # Get hierarchy info for this device
+    h = hier_lookup.get(dev_id, {})
+
+    # One row per day
+    for date_str in date_strs:
+        row = {
+            # Identity
+            'device_id':       dev_id,
+            'device_name':     h.get('device_name',''),
+            'date':            date_str,
+            # Hierarchy
+            'bank_name':       h.get('bank_name',''),
+            'ho_name':         h.get('ho_name',''),
+            'nbg_name':        h.get('nbg_name',''),
+            'lho_name':        h.get('lho_name',''),
+            'zo_name':         h.get('zo_name',''),
+            'ro_name':         h.get('ro_name',''),
+            'branch_name':     h.get('branch_name',''),
+            'branch_code':     h.get('branch_code',''),
+            'full_path':       h.get('full_path',''),
+            'hierarchy_depth': h.get('hierarchy_depth',0),
+            'nvr_brand':       h.get('nvr_brand',''),
+        }
+        # Add all TS key values for this day
+        for key in ALL_TS_KEYS:
+            row[key] = daily[key][date_str]
+        ts_rows.append(row)
+
+ts_device_df = pd.DataFrame(ts_rows)
+
+# Basic stats
+total_rows     = len(ts_device_df)
+non_null_rows  = ts_device_df[ALL_TS_KEYS[0]].notna().sum()
+
+print(f'\n✅ ts_device_df built:')
+print(f'   Rows (device-days)  : {total_rows:,}')
+print(f'   Columns             : {len(ts_device_df.columns)}')
+print(f'   Devices             : {ts_device_df["device_id"].nunique()}')
+print(f'   Date range          : {ts_device_df["date"].min()} → {ts_device_df["date"].max()}')
+
+# Coverage per key
+print('\n📊 Key coverage (% of device-days with data):')
+for key in ALL_TS_KEYS:
+    if key in ts_device_df.columns:
+        n   = ts_device_df[key].notna().sum()
+        pct = 100 * n // max(total_rows,1)
+        bar = '█' * (pct // 5)
+        print(f'   {key:<35} {pct:>4}%  {bar}')
+
+
+--- Cell 36 ---
+# ── Helpers (safe-cast, needed if Cell 4 not in scope) ───────────────────────
+def safe_float(v, d=0.0):
+    try:   return float(v or 0)
+    except: return d
+
+def safe_int(v, d=0):
+    try:   return int(float(v or 0))
+    except: return d
+
+def _bool_true(v):
+    """Return True if the statusbox boolean string is 'true' / '1'."""
+    return str(v or '').strip().lower() in ('true', '1')
+
+def _bool_false(v):
+    """Return True if the statusbox boolean string is 'false' / '0'."""
+    return str(v or '').strip().lower() in ('false', '0')
+
+
+def score_ts_row(row):
+    """
+    Score a daily TS snapshot using ONLY the keys that actually exist in
+    ThingsBoard telemetry (statusbox_*, heartbeat_*, battery_voltage, etc.).
+
+    Server-attribute-only keys (nvrStatus, hddStatus, fasStatus …) are NOT
+    available here — they do not appear in the time-series API response.
+    """
+    s, reasons = 0.0, []
+
+    # ── System on/off ─────────────────────────────────────────────────────────
+    if _bool_false(row.get('statusbox_system_on')):
+        s += 35; reasons.append('SYS_OFF(+35)')
+
+    # ── System health ─────────────────────────────────────────────────────────
+    if _bool_false(row.get('statusbox_system_healthy')):
+        s += 25; reasons.append('SYS_UNHEALTHY(+25)')
+
+    # ── Mains / power ─────────────────────────────────────────────────────────
+    if _bool_false(row.get('statusbox_mains_on')):
+        s += 20; reasons.append('MAINS_OFF(+20)')
+
+    # ── Battery ───────────────────────────────────────────────────────────────
+    if _bool_true(row.get('statusbox_battery_low')):
+        s += 15; reasons.append('BATT_LOW(+15)')
+    if _bool_true(row.get('statusbox_battery_reverse')):
+        s += 10; reasons.append('BATT_REVERSE(+10)')
+
+    # ── SOS active ────────────────────────────────────────────────────────────
+    if _bool_true(row.get('statusbox_sos_status')):
+        s += 20; reasons.append('SOS_ACTIVE(+20)')
+
+    # ── Heartbeat — each offline subsystem adds to score ──────────────────────
+    HB_WEIGHT = {
+        'heartbeat_BAS':            15,
+        'heartbeat_FAS':            15,
+        'heartbeat_CCTV':           12,
+        'heartbeat_access_control': 12,
+        'heartbeat_time_lock':      10,
+    }
+    for hb_key, pts in HB_WEIGHT.items():
+        val = str(row.get(hb_key, '') or '').strip().lower()
+        if val == 'offline':
+            s += pts; reasons.append(f'{hb_key.upper()}_OFFLINE(+{pts})')
+
+    # ── Battery voltage (float, from §3 flat dict) ────────────────────────────
+    bv = safe_float(row.get('battery_voltage', -1))
+    if 0 < bv < 11.0:
+        s += 15; reasons.append(f'BATT_V_CRIT({bv:.1f}V)(+15)')
+    elif 11.0 <= bv < 12.0:
+        s += 8;  reasons.append(f'BATT_V_WARN({bv:.1f}V)(+8)')
+
+    # ── AC voltage out-of-range ───────────────────────────────────────────────
+    av = safe_float(row.get('ac_voltage', -1))
+    if 0 < av < 180:
+        s += 10; reasons.append(f'AC_V_LOW({av:.0f}V)(+10)')
+
+    # ── BAS downtime ──────────────────────────────────────────────────────────
+    bd = safe_float(row.get('BAS_Downtime_Minutes', 0))
+    if   bd >= 1440: s += 30; reasons.append(f'BAS_DT_{bd:.0f}m(+30)')
+    elif bd >= 480:  s += 20; reasons.append(f'BAS_DT_{bd:.0f}m(+20)')
+    elif bd >= 60:   s += 10; reasons.append(f'BAS_DT_{bd:.0f}m(+10)')
+
+    # ── Zero data usage ───────────────────────────────────────────────────────
+    data_mb = safe_float(row.get('Total_Data_Usage', -1))
+    if data_mb == 0:
+        s += 20; reasons.append('ZERO_DATA(+20)')
+
+    # ── SW / firmware failure ─────────────────────────────────────────────────
+    if str(row.get('sw_state', '') or '').upper() in ('FAILED', 'FAILED_UPDATE', 'ERROR'):
+        s += 10; reasons.append('FW_FAIL(+10)')
+
+    score = round(min(s, 100), 2)
+    sev   = ('CRITICAL' if score >= 70 else 'HIGH' if score >= 45
+             else 'MEDIUM' if score >= 20 else 'HEALTHY')
+    return score, sev, ' | '.join(reasons[:5]) or 'OK'
+
+
+print(f'⚙️  Scoring {len(ts_device_df):,} daily snapshots ...')
+ts_device_df[['ts_fault_score', 'ts_severity', 'ts_top_reasons']] = \
+    ts_device_df.apply(lambda r: pd.Series(score_ts_row(r)), axis=1)
+
+print(f'\n✅ Scored {len(ts_device_df):,} rows')
+
+sev_counts = ts_device_df['ts_severity'].value_counts()
+print('\nSeverity distribution across all device-days:')
+for sev in ['CRITICAL', 'HIGH', 'MEDIUM', 'HEALTHY']:
+    n   = int(sev_counts.get(sev, 0))
+    pct = 100 * n // max(len(ts_device_df), 1)
+    bar = '█' * (pct // 3)
+    print(f'  {sev:<10} {n:>8}  ({pct}%)  {bar}')
+
+# ── Key coverage sanity check ─────────────────────────────────────────────────
+print('\n📊 Key coverage in daily snapshots (% rows with non-null value):')
+_check_keys = [
+    'statusbox_system_on', 'statusbox_system_healthy', 'statusbox_mains_on',
+    'statusbox_battery_low', 'battery_voltage', 'ac_voltage', 'system_current',
+    'heartbeat_BAS', 'heartbeat_FAS', 'heartbeat_CCTV',
+    'Total_Data_Usage', 'BAS_Downtime_Minutes', 'sw_state',
+]
+total_rows = len(ts_device_df)
+for k in _check_keys:
+    if k in ts_device_df.columns:
+        n   = ts_device_df[k].notna().sum()
+        pct = 100 * n // max(total_rows, 1)
+        bar = '█' * (pct // 5)
+        print(f'   {k:<40} {pct:>4}%  {bar}')
+
+print('\nSample — last 7 days of first 3 devices:')
+last7 = ts_device_df[
+    ts_device_df['date'] >= (datetime.utcnow() - timedelta(days=7)).strftime('%Y-%m-%d')
+]
+for dev_id in ts_device_df['device_id'].unique()[:3]:
+    sub = last7[last7['device_id'] == dev_id][[
+        'date', 'device_name', 'ts_fault_score', 'ts_severity', 'ts_top_reasons'
+    ]]
+    print(f'\n  {sub["device_name"].iloc[0] if len(sub) > 0 else dev_id}:')
+    if len(sub): print(sub.to_string(index=False))
+
+
+--- Cell 38 ---
+import json
+import os
+from openpyxl.styles import PatternFill, Font, Alignment
+from openpyxl.utils import get_column_letter
+from openpyxl import load_workbook
+
+TS_JSONL_PATH  = 'ml_training_timeseries.jsonl'
+TS_XLSX_PATH   = f'ts_summary_{datetime.now().strftime("%Y%m%d_%H%M")}.xlsx'
+COMBINED_JSONL = 'ml_training_combined.jsonl'
+
+# ── ML JSONL export ───────────────────────────────────────────────────────────
+written = skipped = 0
+with open(TS_JSONL_PATH, 'w', encoding='utf-8') as f:
+    for _, row in ts_device_df.iterrows():
+        parts = []
+
+        # Hierarchy context
+        if row.get('bank_name'):   parts.append(f'bank:{row["bank_name"]}')
+        if row.get('nbg_name'):    parts.append(f'nbg:{row["nbg_name"]}')
+        if row.get('zo_name'):     parts.append(f'zo:{row["zo_name"]}')
+        if row.get('branch_name'): parts.append(f'branch:{row["branch_name"]}')
+        parts.append(f'date:{row["date"]}')
+        if row.get('nvr_brand'):   parts.append(f'nvr_brand:{row["nvr_brand"]}')
+
+        # statusbox fields (boolean strings from spec §4)
+        for key in [
+            'statusbox_system_on', 'statusbox_system_healthy', 'statusbox_mains_on',
+            'statusbox_battery_low', 'statusbox_battery_reverse', 'statusbox_sos_status',
+            'statusbox_network',
+        ]:
+            v = str(row.get(key, '') or '').strip()
+            if v and v.lower() not in ('', 'null', 'none', 'nan'):
+                parts.append(f'{key}:{v}')
+
+        # Heartbeat statuses (spec §5)
+        for hb in ['heartbeat_BAS', 'heartbeat_FAS', 'heartbeat_CCTV',
+                   'heartbeat_access_control', 'heartbeat_time_lock']:
+            v = str(row.get(hb, '') or '').strip().lower()
+            if v in ('online', 'offline'):
+                parts.append(f'{hb}:{v}')
+
+        # SW state
+        sw = str(row.get('sw_state', '') or '').strip()
+        if sw and sw.lower() not in ('', 'null', 'none', 'nan'):
+            parts.append(f'sw_state:{sw}')
+
+        # Numeric telemetry
+        data_mb = safe_float(row.get('Total_Data_Usage', -1))
+        if data_mb >= 0:
+            parts.append(f'data_mb:{data_mb:.0f}')
+
+        bd = safe_float(row.get('BAS_Downtime_Minutes', 0))
+        if bd > 0:
+            parts.append(f'bas_dt_min:{bd:.0f}')
+
+        cavli = safe_float(row.get('cavlidata_ontime', 0))
+        if cavli > 0:
+            parts.append(f'cavli_ontime:{cavli:.0f}')
+
+        bv = safe_float(row.get('battery_voltage', 0))
+        if bv > 0:
+            parts.append(f'batt_v:{bv:.1f}')
+
+        av = safe_float(row.get('ac_voltage', 0))
+        if av > 0:
+            parts.append(f'ac_v:{av:.0f}')
+
+        sc = safe_float(row.get('system_current', 0))
+        if sc > 0:
+            parts.append(f'sys_curr:{sc:.2f}')
+
+        if row.get('hierarchy_depth'):
+            parts.append(f'hier_depth:{row["hierarchy_depth"]}')
+
+        if len(parts) < 3:
+            skipped += 1
+            continue
+
+        f.write(json.dumps({
+            'input':  ' '.join(parts),
+            'output': (
+                f'fault_class:{row["ts_severity"]} '
+                f'fault_score:{row["ts_fault_score"]:.0f} '
+                f'reasons:{row["ts_top_reasons"]}'
+            ),
+            '_meta': {
+                'device_id': row.get('device_id', ''),
+                'date':      row.get('date', ''),
+                'bank':      row.get('bank_name', ''),
+                'score':     row.get('ts_fault_score', 0),
+            },
+        }, ensure_ascii=False) + '\n')
+        written += 1
+
+print(f'✅ TS JSONL: {TS_JSONL_PATH} — {written:,} examples ({skipped:,} skipped)')
+
+# ── Combined JSONL ────────────────────────────────────────────────────────────
+combined = 0
+with open(COMBINED_JSONL, 'w', encoding='utf-8') as out:
+    for src in ['ml_training_v10.jsonl', TS_JSONL_PATH]:
+        if os.path.exists(src):
+            with open(src, 'r', encoding='utf-8') as inp:
+                for line in inp:
+                    line = line.strip()
+                    if line:
+                        out.write(line + '\n')
+                        combined += 1
+print(f'✅ Combined JSONL: {COMBINED_JSONL} — {combined:,} total examples')
+
+# ── Excel export ──────────────────────────────────────────────────────────────
+drop_cols = [c for c in ts_device_df.columns
+             if 'json' in c.lower() or c.startswith('raw_')]
+ts_exp = ts_device_df.drop(columns=drop_cols, errors='ignore')
+
+# Sheet 2: per-device trend
+trend_df = (
+    ts_device_df
+    .groupby(
+        ['device_id', 'device_name', 'bank_name', 'nbg_name', 'zo_name', 'branch_name'],
+        dropna=False
+    )
+    .agg(
+        days_with_data       = ('ts_fault_score',       'count'),
+        avg_fault_score      = ('ts_fault_score',       'mean'),
+        max_fault_score      = ('ts_fault_score',       'max'),
+        days_critical        = ('ts_severity',          lambda x: (x == 'CRITICAL').sum()),
+        days_high            = ('ts_severity',          lambda x: (x == 'HIGH').sum()),
+        days_healthy         = ('ts_severity',          lambda x: (x == 'HEALTHY').sum()),
+        total_bas_dt_hrs     = ('BAS_Downtime_Minutes', lambda x: round(safe_float(x.sum()) / 60, 1)),
+        total_data_mb        = ('Total_Data_Usage',     lambda x: round(safe_float(x.sum()), 1)),
+        days_zero_data       = ('Total_Data_Usage',     lambda x: (x.apply(safe_float) == 0).sum()),
+        days_mains_off       = ('statusbox_mains_on',   lambda x: x.apply(
+                                    lambda v: str(v or '').strip().lower() in ('false', '0')).sum()),
+        days_sys_unhealthy   = ('statusbox_system_healthy', lambda x: x.apply(
+                                    lambda v: str(v or '').strip().lower() in ('false', '0')).sum()),
+        days_batt_low        = ('statusbox_battery_low', lambda x: x.apply(
+                                    lambda v: str(v or '').strip().lower() in ('true', '1')).sum()),
+        avg_battery_voltage  = ('battery_voltage',      lambda x: round(
+                                    pd.to_numeric(x, errors='coerce').mean(), 2)),
+    )
+    .reset_index()
+    .sort_values('avg_fault_score', ascending=False)
+)
+trend_df['avg_fault_score'] = trend_df['avg_fault_score'].round(1)
+
+# Sheet 3: bank × date heatmap
+heat_df = (
+    ts_device_df
+    .groupby(['bank_name', 'date'])
+    .agg(
+        devices   = ('device_id',      'nunique'),
+        avg_score = ('ts_fault_score', 'mean'),
+        critical  = ('ts_severity',    lambda x: (x == 'CRITICAL').sum()),
+        high      = ('ts_severity',    lambda x: (x == 'HIGH').sum()),
+        days_mains_off = ('statusbox_mains_on', lambda x: x.apply(
+                              lambda v: str(v or '').strip().lower() in ('false', '0')).sum()),
+        days_batt_low  = ('statusbox_battery_low', lambda x: x.apply(
+                              lambda v: str(v or '').strip().lower() in ('true', '1')).sum()),
+    )
+    .reset_index()
+)
+heat_df['avg_score'] = heat_df['avg_score'].round(1)
+
+# Style helpers
+HDR   = PatternFill('solid', fgColor='1B3A5C')
+HF    = Font(bold=True, color='FFFFFF')
+HA    = Alignment(horizontal='center', vertical='center', wrap_text=True)
+FILLS = {
+    'CRITICAL': PatternFill('solid', fgColor='FFCCCC'),
+    'HIGH':     PatternFill('solid', fgColor='FFE5CC'),
+    'MEDIUM':   PatternFill('solid', fgColor='FFFACC'),
+    'HEALTHY':  PatternFill('solid', fgColor='CCFFCC'),
+}
+
+def style_ws(ws, sev_col=None):
+    for c in ws[1]: c.fill = HDR; c.font = HF; c.alignment = HA
+    ws.row_dimensions[1].height = 28
+    ws.freeze_panes = 'A2'
+    for col in ws.columns:
+        w = max((len(str(c.value or '')) for c in col), default=8)
+        ws.column_dimensions[get_column_letter(col[0].column)].width = min(w + 3, 42)
+    if sev_col:
+        sc = next((c.column for c in ws[1] if str(c.value) == sev_col), None)
+        if sc:
+            for row in ws.iter_rows(min_row=2, min_col=sc, max_col=sc):
+                for cell in row:
+                    cell.fill = FILLS.get(str(cell.value), PatternFill())
+
+with pd.ExcelWriter(TS_XLSX_PATH, engine='openpyxl') as w:
+    ts_exp.to_excel(w,    sheet_name='Daily Snapshots', index=False)
+    trend_df.to_excel(w,  sheet_name='Device Trend',    index=False)
+    heat_df.to_excel(w,   sheet_name='Bank×Date Heat',  index=False)
+
+wb = load_workbook(TS_XLSX_PATH)
+style_ws(wb['Daily Snapshots'], sev_col='ts_severity')
+style_ws(wb['Device Trend'])
+style_ws(wb['Bank×Date Heat'])
+wb.save(TS_XLSX_PATH)
+
+print(f'\n✅ Excel: {TS_XLSX_PATH} ({os.path.getsize(TS_XLSX_PATH) // 1024} KB) — 3 sheets')
+print(f'\n📊 FINAL TIME-SERIES SUMMARY:')
+print(f'   Device-day rows     : {len(ts_device_df):,}')
+print(f'   Devices             : {ts_device_df["device_id"].nunique()}')
+print(f'   Days                : {len(date_strs)}')
+print(f'   TS JSONL examples   : {written:,}')
+print(f'   Combined JSONL total: {combined:,}')
+print(f'\n   Severity (all device-days):')
+for sev in ['CRITICAL', 'HIGH', 'MEDIUM', 'HEALTHY']:
+    n   = int(sev_counts.get(sev, 0))
+    pct = 100 * n // max(len(ts_device_df), 1)
+    print(f'   {sev:<10} : {n:>8} ({pct}%)')
+print(f'\n🧠 Ready for ML training:')
+print(f'   File: {COMBINED_JSONL}  ({combined:,} examples)')
+
+
