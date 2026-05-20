@@ -9,9 +9,3 @@ __pycache__/
 *.pyc
 .idea/
 .venv/
-
-# Large generated data outputs
-*.csv
-*.xlsx
-*.jsonl
-dashboard_data.json  
