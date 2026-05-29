@@ -89,6 +89,9 @@ You already have `automate_harvest.bat` doing harvest + git commit + push. The m
 1. **Fix `run_nightly_audit.py`** — change `NOTEBOOK_PATH = "TB_Device_Audit_v7.ipynb"` to `TB_Full_Harvest_v11.ipynb`. Currently it points at a non-existent file.
 2. **Update `README.md`** — replace all v6/v7/v8 references with v11.
 3. **Set up Windows Task Scheduler** (or pick another scheduler) to run `automate_harvest.bat` nightly at e.g. 02:00 IST. Verify it actually fires.
+   - `automate_harvest.bat` now calls `run_current_state_snapshot.bat` before staging outputs.
+   - To schedule only the current-state pull, run `.\schedule_current_state_snapshot.ps1 -RunTime 02:00`.
+   - The nightly current-state pull writes `current_state_snapshots/current_state_YYYYMMDD.csv` with `active`, `lastDisconnectTime`, and `lastConnectTime`, then refreshes `current_state_snapshots/offline_recoveries.csv` from accumulated snapshots.
 4. **Wire Slack / email** — `run_nightly_audit.py` already has hooks; needs `SLACK_WEBHOOK` and `SMTP_PASSWORD` in env vars. After the nightly run, post a message: *"N devices CRITICAL today (was M yesterday). Top 5 branches: …"*
 5. **Disk hygiene:** the harvest writes 5 timestamped xlsx + 2 jsonl files per run. After 30 days that's a lot. Add a "keep last 7 daily + last 12 monthly" rotation in `audit_reports/`.
 
