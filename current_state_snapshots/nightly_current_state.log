@@ -25,3 +25,57 @@ Authenticated. Devices: 184. Snapshot: 2026-05-29T10:30:59.593000+00:00
 Wrote 184 current-state snapshots -> current_state_snapshots\current_state_20260529.csv
 Wrote 0 derived recoveries -> current_state_snapshots\offline_recoveries.csv
 Current-state snapshot completed: 29-05-2026 16:04:49.20 
+==================================================== 
+Starting current-state snapshot: 30-05-2026  2:00:02.36 
+==================================================== 
+Authenticated. Devices: 184. Snapshot: 2026-05-29T20:30:03.409000+00:00
+[1/184] abc
+[10/184] BOB-KALIKAPUR
+[20/184] BOI-ASHANGI
+[30/184] BOI-BAS
+[40/184] BOI-CHANDEKASARE
+[50/184] BOI-DIBRUGARH
+[60/184] BOI-JAGULI
+[70/184] BOI-KOLABERA
+[80/184] BOI-MISROD
+[90/184] BOI-RAIRANGPUR
+[100/184] BOI-SAVEDI
+[110/184] BOI-TARAKESHWAR
+[120/184] DEMO ASCTIVE BRANCH TEST
+[130/184] My Test boi
+[140/184] PROD1-SM
+[150/184] RND48
+[160/184] SBI NARKATIYAGANJ
+[170/184] SDF-RASP5-NG1
+[180/184] SLINK-PRODUCTION5
+[184/184] Testing Device
+Wrote 184 current-state snapshots -> current_state_snapshots\current_state_20260530.csv
+Wrote 0 derived recoveries -> current_state_snapshots\offline_recoveries.csv
+Current-state snapshot completed: 30-05-2026  2:03:34.77 
+==================================================== 
+Starting current-state snapshot: 30-05-2026 10:48:01.58 
+==================================================== 
+Authenticated. Devices: 184. Snapshot: 2026-05-30T05:18:02.396000+00:00
+[1/184] abc
+[10/184] BOB-KALIKAPUR
+[20/184] BOI-ASHANGI
+[30/184] BOI-BAS
+[40/184] BOI-CHANDEKASARE
+[50/184] BOI-DIBRUGARH
+[60/184] BOI-JAGULI
+[70/184] BOI-KOLABERA
+[80/184] BOI-MISROD
+[90/184] BOI-RAIRANGPUR
+[100/184] BOI-SAVEDI
+[110/184] BOI-TARAKESHWAR
+[120/184] DEMO ASCTIVE BRANCH TEST
+[130/184] My Test boi
+[140/184] PROD1-SM
+[150/184] RND48
+[160/184] SBI NARKATIYAGANJ
+[170/184] SDF-RASP5-NG1
+[180/184] SLINK-PRODUCTION5
+[184/184] Testing Device
+Wrote 184 current-state snapshots -> current_state_snapshots\current_state_20260530.csv
+Wrote 0 derived recoveries -> current_state_snapshots\offline_recoveries.csv
+Current-state snapshot completed: 30-05-2026 10:51:36.99 
