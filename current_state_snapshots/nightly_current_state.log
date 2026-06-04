@@ -163,3 +163,118 @@ Authenticated. Devices: 184. Snapshot: 2026-06-02T05:16:10.665000+00:00
 Wrote 184 current-state snapshots -> current_state_snapshots\current_state_20260602.csv
 Wrote 0 derived recoveries -> current_state_snapshots\offline_recoveries.csv
 Current-state snapshot completed: 02-06-2026 10:49:48.86 
+==================================================== 
+Starting current-state snapshot: 03-06-2026 10:51:49.34 
+==================================================== 
+Traceback (most recent call last):
+  File "C:\Users\itine\AppData\Roaming\Python\Python314\site-packages\urllib3\connection.py", line 204, in _new_conn
+    sock = connection.create_connection(
+        (self._dns_host, self.port),
+    ...<2 lines>...
+        socket_options=self.socket_options,
+    )
+  File "C:\Users\itine\AppData\Roaming\Python\Python314\site-packages\urllib3\util\connection.py", line 60, in create_connection
+    for res in socket.getaddrinfo(host, port, family, socket.SOCK_STREAM):
+               ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python314\Lib\socket.py", line 983, in getaddrinfo
+    for res in _socket.getaddrinfo(host, port, family, type, proto, flags):
+               ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+socket.gaierror: [Errno 11001] getaddrinfo failed
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\itine\AppData\Roaming\Python\Python314\site-packages\urllib3\connectionpool.py", line 787, in urlopen
+    response = self._make_request(
+        conn,
+    ...<10 lines>...
+        **response_kw,
+    )
+  File "C:\Users\itine\AppData\Roaming\Python\Python314\site-packages\urllib3\connectionpool.py", line 488, in _make_request
+    raise new_e
+  File "C:\Users\itine\AppData\Roaming\Python\Python314\site-packages\urllib3\connectionpool.py", line 464, in _make_request
+    self._validate_conn(conn)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\itine\AppData\Roaming\Python\Python314\site-packages\urllib3\connectionpool.py", line 1093, in _validate_conn
+    conn.connect()
+    ~~~~~~~~~~~~^^
+  File "C:\Users\itine\AppData\Roaming\Python\Python314\site-packages\urllib3\connection.py", line 759, in connect
+    self.sock = sock = self._new_conn()
+                       ~~~~~~~~~~~~~~^^
+  File "C:\Users\itine\AppData\Roaming\Python\Python314\site-packages\urllib3\connection.py", line 211, in _new_conn
+    raise NameResolutionError(self.host, self, e) from e
+urllib3.exceptions.NameResolutionError: HTTPSConnection(host='seple.iot-private.cloud', port=443): Failed to resolve 'seple.iot-private.cloud' ([Errno 11001] getaddrinfo failed)
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\itine\AppData\Roaming\Python\Python314\site-packages\requests\adapters.py", line 644, in send
+    resp = conn.urlopen(
+        method=request.method,
+    ...<9 lines>...
+        chunked=chunked,
+    )
+  File "C:\Users\itine\AppData\Roaming\Python\Python314\site-packages\urllib3\connectionpool.py", line 841, in urlopen
+    retries = retries.increment(
+        method, url, error=new_e, _pool=self, _stacktrace=sys.exc_info()[2]
+    )
+  File "C:\Users\itine\AppData\Roaming\Python\Python314\site-packages\urllib3\util\retry.py", line 535, in increment
+    raise MaxRetryError(_pool, url, reason) from reason  # type: ignore[arg-type]
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+urllib3.exceptions.MaxRetryError: HTTPSConnectionPool(host='seple.iot-private.cloud', port=443): Max retries exceeded with url: /api/auth/login (Caused by NameResolutionError("HTTPSConnection(host='seple.iot-private.cloud', port=443): Failed to resolve 'seple.iot-private.cloud' ([Errno 11001] getaddrinfo failed)"))
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\workspace\Data_scrapping_thgingsboard_ml-intern\pull_current_state_snapshots.py", line 340, in <module>
+    raise SystemExit(main(sys.argv[1:]))
+                     ~~~~^^^^^^^^^^^^^^
+  File "C:\workspace\Data_scrapping_thgingsboard_ml-intern\pull_current_state_snapshots.py", line 293, in main
+    client = ThingsBoardClient(host, email, password, verify_tls=args.verify_tls)
+  File "C:\workspace\Data_scrapping_thgingsboard_ml-intern\pull_outage_labels.py", line 223, in __init__
+    resp = self.session.post(
+        f"{self.host}/api/auth/login",
+    ...<2 lines>...
+        timeout=30,
+    )
+  File "C:\Users\itine\AppData\Roaming\Python\Python314\site-packages\requests\sessions.py", line 637, in post
+    return self.request("POST", url, data=data, json=json, **kwargs)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\itine\AppData\Roaming\Python\Python314\site-packages\requests\sessions.py", line 589, in request
+    resp = self.send(prep, **send_kwargs)
+  File "C:\Users\itine\AppData\Roaming\Python\Python314\site-packages\requests\sessions.py", line 703, in send
+    r = adapter.send(request, **kwargs)
+  File "C:\Users\itine\AppData\Roaming\Python\Python314\site-packages\requests\adapters.py", line 677, in send
+    raise ConnectionError(e, request=request)
+requests.exceptions.ConnectionError: HTTPSConnectionPool(host='seple.iot-private.cloud', port=443): Max retries exceeded with url: /api/auth/login (Caused by NameResolutionError("HTTPSConnection(host='seple.iot-private.cloud', port=443): Failed to resolve 'seple.iot-private.cloud' ([Errno 11001] getaddrinfo failed)"))
+[ERROR] Current-state snapshot failed: 03-06-2026 10:51:59.11 
+==================================================== 
+Starting current-state snapshot: 04-06-2026  9:33:14.37 
+==================================================== 
+==================================================== 
+Starting current-state snapshot: 04-06-2026 10:11:01.64 
+==================================================== 
+Authenticated. Devices: 184. Snapshot: 2026-06-04T04:41:02.309000+00:00
+[1/184] abc
+[10/184] BOB-KALIKAPUR
+[20/184] BOI-ASHANGI
+[30/184] BOI-BAS
+[40/184] BOI-CHANDEKASARE
+[50/184] BOI-DIBRUGARH
+[60/184] BOI-JAGULI
+[70/184] BOI-KOLABERA
+[80/184] BOI-MISROD
+[90/184] BOI-RAIRANGPUR
+[100/184] BOI-SAVEDI
+[110/184] BOI-TARAKESHWAR
+[120/184] DEMO ASCTIVE BRANCH TEST
+[130/184] My Test boi
+[140/184] PROD1-SM
+[150/184] RND48
+[160/184] SBI NARKATIYAGANJ
+[170/184] SDF-RASP5-NG1
+[180/184] SLINK-PRODUCTION5
+[184/184] Testing Device
+Wrote 184 current-state snapshots -> current_state_snapshots\current_state_20260604.csv
+Wrote 0 derived recoveries -> current_state_snapshots\offline_recoveries.csv
+Current-state snapshot completed: 04-06-2026 10:14:34.90 
