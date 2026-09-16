@@ -1,0 +1,10 @@
+{
+  "system_status.statusbox_mains_on": "statusbox_mains_on",
+  "system_status.statusbox_network": "statusbox_network",
+  "system_status.statusbox_no_of_connected_device": "statusbox_no_of_connected_device",
+  "systemstatus": "systemStatus",
+  "Rock.dexter_date": "rock.dexter_date",
+  "Rock.manufacturer": "rock.manufacturer",
+  "Rock.model": "rock.model",
+  "Rock.time": "rock.Time"
+}

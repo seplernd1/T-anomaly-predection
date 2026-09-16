@@ -9,3 +9,7 @@ __pycache__/
 *.pyc
 .idea/
 .venv/
+smoke_test.log
+
+# Generated harvest outputs (too bulky for git; re-pullable)
+data_harvest/

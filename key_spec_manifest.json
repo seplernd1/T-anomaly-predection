@@ -1,0 +1,482 @@
+{
+  "gateway": [
+    {
+      "raw_key": "gateway_sts",
+      "clean_key": "gateway_sts",
+      "group": "gateway",
+      "intent": "gateway status/SYSTEM STATUS",
+      "description": ""
+    },
+    {
+      "raw_key": "gateway.powerStatus",
+      "clean_key": "gateway.powerStatus",
+      "group": "gateway",
+      "intent": "POWER STATUS",
+      "description": ""
+    },
+    {
+      "raw_key": "gateway.systemStatus",
+      "clean_key": "gateway.systemStatus",
+      "group": "gateway",
+      "intent": "Health Status",
+      "description": ""
+    }
+  ],
+  "statusbox": [
+    {
+      "raw_key": "system_status.statusbox_mains_on",
+      "clean_key": "statusbox_mains_on",
+      "group": "statusbox",
+      "intent": "MAINS STATUS/Power Supply Status",
+      "description": ""
+    },
+    {
+      "raw_key": "statusbox_network",
+      "clean_key": "statusbox_network",
+      "group": "statusbox",
+      "intent": "Network /Network Status / Operator /Network Operator",
+      "description": "if statusbox_network exists     if not empty         Status = On         Operator = Network Name     else         Status = Off         Operator = \"-\""
+    },
+    {
+      "raw_key": "statusbox_sos_status",
+      "clean_key": "statusbox_sos_status",
+      "group": "statusbox",
+      "intent": "SOS Status",
+      "description": ""
+    },
+    {
+      "raw_key": "System_status.statusbox_no_of_connected_device",
+      "clean_key": "System_status.statusbox_no_of_connected_device",
+      "group": "statusbox",
+      "intent": "Devices Connected /Connected Devices",
+      "description": ""
+    },
+    {
+      "raw_key": "statusbox_no_of_connected_device",
+      "clean_key": "statusbox_no_of_connected_device",
+      "group": "statusbox",
+      "intent": "Devices Connected /Connected Devices",
+      "description": ""
+    }
+  ],
+  "power": [
+    {
+      "raw_key": "battery_voltage",
+      "clean_key": "battery_voltage",
+      "group": "power",
+      "intent": "Battery Voltage Status",
+      "description": ""
+    },
+    {
+      "raw_key": "system_current",
+      "clean_key": "system_current",
+      "group": "power",
+      "intent": "Current Status/System Current Status",
+      "description": ""
+    },
+    {
+      "raw_key": "ac_voltage",
+      "clean_key": "ac_voltage",
+      "group": "power",
+      "intent": "AC Voltage Status",
+      "description": ""
+    }
+  ],
+  "cctv": [
+    {
+      "raw_key": "cctv.powerStatus",
+      "clean_key": "cctv.powerStatus",
+      "group": "cctv",
+      "intent": "CCTV Status / CCTV Power Status",
+      "description": ""
+    },
+    {
+      "raw_key": "cctv.healthStatus",
+      "clean_key": "cctv.healthStatus",
+      "group": "cctv",
+      "intent": "Camera Status",
+      "description": ""
+    },
+    {
+      "raw_key": "systemStatus",
+      "clean_key": "systemStatus",
+      "group": "cctv",
+      "intent": "Camera Link Status",
+      "description": "if valid systemStatus     if Normal / Online / Active         Status = Online     else         Status = Offline else     Status = N/A"
+    },
+    {
+      "raw_key": "hddStatus",
+      "clean_key": "hddStatus",
+      "group": "cctv",
+      "intent": "HDD Status",
+      "description": ""
+    },
+    {
+      "raw_key": "cctv_sts",
+      "clean_key": "cctv_sts",
+      "group": "cctv",
+      "intent": "cctv status/cctv heart beat / Cctv system status",
+      "description": ""
+    },
+    {
+      "raw_key": "const hddInfo = data[\"rock.HddINFO\"];  let totalCapacity = 0;  for (const hdd of hddInfo) {     totalCapacity += parseFl",
+      "clean_key": "rock.hdd_total_capacity",
+      "group": "cctv",
+      "intent": "Cctv storage status",
+      "description": "[derived] "
+    },
+    {
+      "raw_key": "const count = rock.VIDEOdETAILS.length;  console.log(count);",
+      "clean_key": "rock.total_cameras",
+      "group": "cctv",
+      "intent": "Total Camera",
+      "description": "[derived] "
+    },
+    {
+      "raw_key": "rock.HddINFO.forEach(hdd => {     console.log(         hdd.HDDSlot,         hdd.HDDStatus,         hdd.HDDCapacity,     ",
+      "clean_key": "rock.hdd_info",
+      "group": "cctv",
+      "intent": "HDD Information",
+      "description": "[derived] "
+    },
+    {
+      "raw_key": "rock.Time",
+      "clean_key": "rock.Time",
+      "group": "cctv",
+      "intent": "Cctv about device / System Time",
+      "description": ""
+    },
+    {
+      "raw_key": "Rock.dexter_date",
+      "clean_key": "rock.dexter_date",
+      "group": "cctv",
+      "intent": "Cctv about device / System Date",
+      "description": ""
+    },
+    {
+      "raw_key": "rock.syncTimeDate",
+      "clean_key": "rock.syncTimeDate",
+      "group": "cctv",
+      "intent": "Cctv about device / Last Sync. Date & Time",
+      "description": ""
+    },
+    {
+      "raw_key": "rock.deviceType",
+      "clean_key": "rock.deviceType",
+      "group": "cctv",
+      "intent": "Cctv about device / Device Type",
+      "description": ""
+    },
+    {
+      "raw_key": "Rock.manufacturer",
+      "clean_key": "rock.manufacturer",
+      "group": "cctv",
+      "intent": "Cctv about device / Device Make /manufacturar",
+      "description": ""
+    },
+    {
+      "raw_key": "Rock.model",
+      "clean_key": "rock.model",
+      "group": "cctv",
+      "intent": "Cctv about device / Device Model",
+      "description": ""
+    },
+    {
+      "raw_key": "rock.serialNumber",
+      "clean_key": "rock.serialNumber",
+      "group": "cctv",
+      "intent": "Cctv about device / Device Serial Number / Serial Number",
+      "description": ""
+    },
+    {
+      "raw_key": "rock.firmwareVersion",
+      "clean_key": "rock.firmwareVersion",
+      "group": "cctv",
+      "intent": "Cctv about device / Firmware Version",
+      "description": ""
+    },
+    {
+      "raw_key": "rock.mfDate",
+      "clean_key": "rock.mfDate",
+      "group": "cctv",
+      "intent": "Cctv about device / MF Date /Manufacturar date",
+      "description": ""
+    },
+    {
+      "raw_key": "rock.CAMERAdETAILS.forEach(camera => {     console.log(         `${camera.channel_no} | ${camera[\"Channel Name\"]} | ${ca",
+      "clean_key": "rock.camera_details",
+      "group": "cctv",
+      "intent": "Camera Information",
+      "description": "[derived] "
+    },
+    {
+      "raw_key": "rock.VIDEOdETAILS.forEach((camera, index) => {     console.log(         `${index + 1} | ${camera.cameraName} | ${camera.",
+      "clean_key": "rock.recording_info",
+      "group": "cctv",
+      "intent": "NVR Recording Information/ Recording information",
+      "description": "[derived] "
+    },
+    {
+      "raw_key": "rock.SdRecINFO.forEach((camera) => {     console.log(         `${camera.channel_no} | ${camera.channel_name} | ${camera.",
+      "clean_key": "rock.sd_recording_info",
+      "group": "cctv",
+      "intent": "SD Recording Information",
+      "description": "[derived] "
+    },
+    {
+      "raw_key": "cameraTamperCount",
+      "clean_key": "cameraTamperCount",
+      "group": "cctv",
+      "intent": "Cctv camera tamper count",
+      "description": ""
+    },
+    {
+      "raw_key": "cameraDisconnectCount",
+      "clean_key": "cameraDisconnectCount",
+      "group": "cctv",
+      "intent": "Cctv camera disconnect count",
+      "description": ""
+    },
+    {
+      "raw_key": "let errorCount = 0;  rock.HddINFO.forEach(hdd => {     if (hdd.HDDStatus.toLowerCase() === \"error\") {         errorCount",
+      "clean_key": "rock.hdd_error_count",
+      "group": "cctv",
+      "intent": "Cctv hdd error count",
+      "description": "[derived] "
+    }
+  ],
+  "ias": [
+    {
+      "raw_key": "ias.powerStatus",
+      "clean_key": "ias.powerStatus",
+      "group": "ias",
+      "intent": "Ias power status/integrated alarm system power status",
+      "description": ""
+    },
+    {
+      "raw_key": "ias.systemStatus",
+      "clean_key": "ias.systemStatus",
+      "group": "ias",
+      "intent": "Ias system status",
+      "description": ""
+    },
+    {
+      "raw_key": "ias.healthStatus",
+      "clean_key": "ias.healthStatus",
+      "group": "ias",
+      "intent": "Ias health status",
+      "description": ""
+    }
+  ],
+  "bas": [
+    {
+      "raw_key": "bas.powerStatus",
+      "clean_key": "bas.powerStatus",
+      "group": "bas",
+      "intent": "Bas power status/Barglar Alarm System power Status",
+      "description": ""
+    },
+    {
+      "raw_key": "bas_sts",
+      "clean_key": "bas_sts",
+      "group": "bas",
+      "intent": "Bas system status",
+      "description": ""
+    },
+    {
+      "raw_key": "bas.healthStatus",
+      "clean_key": "bas.healthStatus",
+      "group": "bas",
+      "intent": "Bas health status",
+      "description": ""
+    },
+    {
+      "raw_key": "basSystemIntegration.heartbeat",
+      "clean_key": "basSystemIntegration.heartbeat",
+      "group": "bas",
+      "intent": "Bas heartbeat",
+      "description": ""
+    },
+    {
+      "raw_key": "basSystemIntegration.panelState",
+      "clean_key": "basSystemIntegration.panelState",
+      "group": "bas",
+      "intent": "Bas panel state",
+      "description": ""
+    },
+    {
+      "raw_key": "basSystemIntegration.panelMode",
+      "clean_key": "basSystemIntegration.panelMode",
+      "group": "bas",
+      "intent": "Bas panel mode",
+      "description": ""
+    },
+    {
+      "raw_key": "basSystemIntegration.zoneInfo.forEach((zone, index) => {     console.log(         `${index + 1} | ${zone.zoneName} | ${z",
+      "clean_key": "bas_zone_info",
+      "group": "bas",
+      "intent": "Bas zone information",
+      "description": "[derived] "
+    },
+    {
+      "raw_key": "basSystemIntegration.basAboutDevice.panelIp",
+      "clean_key": "basSystemIntegration.basAboutDevice.panelIp",
+      "group": "bas",
+      "intent": "Bas about device panel ip",
+      "description": ""
+    },
+    {
+      "raw_key": "basSystemIntegration.basAboutDevice.model",
+      "clean_key": "basSystemIntegration.basAboutDevice.model",
+      "group": "bas",
+      "intent": "Bas about device model",
+      "description": ""
+    },
+    {
+      "raw_key": "basSystemIntegration.basAboutDevice.firmwareVersion",
+      "clean_key": "basSystemIntegration.basAboutDevice.firmwareVersion",
+      "group": "bas",
+      "intent": "Bas Firmware Version",
+      "description": ""
+    },
+    {
+      "raw_key": "basSystemIntegration.basAboutDevice.lastUpdated",
+      "clean_key": "basSystemIntegration.basAboutDevice.lastUpdated",
+      "group": "bas",
+      "intent": "Bas Last Updated",
+      "description": ""
+    },
+    {
+      "raw_key": "basSystemIntegration.basPowerStatus.systemVoltage",
+      "clean_key": "basSystemIntegration.basPowerStatus.systemVoltage",
+      "group": "bas",
+      "intent": "Bas Power Status System voltage",
+      "description": ""
+    },
+    {
+      "raw_key": "basSystemIntegration.basPowerStatus.batteryVoltage",
+      "clean_key": "basSystemIntegration.basPowerStatus.batteryVoltage",
+      "group": "bas",
+      "intent": "Bas batteryVoltage",
+      "description": ""
+    },
+    {
+      "raw_key": "basSystemIntegration.basPowerStatus.systemCurrent",
+      "clean_key": "basSystemIntegration.basPowerStatus.systemCurrent",
+      "group": "bas",
+      "intent": "Bas systemCurrent",
+      "description": ""
+    },
+    {
+      "raw_key": "basSystemIntegration.basPowerStatus.batteryCurrent",
+      "clean_key": "basSystemIntegration.basPowerStatus.batteryCurrent",
+      "group": "bas",
+      "intent": "Bas batteryCurrent",
+      "description": ""
+    },
+    {
+      "raw_key": "basSystemIntegration.basPowerStatus.batteryStatus",
+      "clean_key": "basSystemIntegration.basPowerStatus.batteryStatus",
+      "group": "bas",
+      "intent": "Bas batteryStatus",
+      "description": ""
+    },
+    {
+      "raw_key": "basSystemIntegration.basPowerStatus.mainStatus",
+      "clean_key": "basSystemIntegration.basPowerStatus.mainStatus",
+      "group": "bas",
+      "intent": "Bas mainStatus",
+      "description": ""
+    }
+  ],
+  "fas": [
+    {
+      "raw_key": "fas.powerStatus",
+      "clean_key": "fas.powerStatus",
+      "group": "fas",
+      "intent": "Fas power status",
+      "description": ""
+    },
+    {
+      "raw_key": "fas_sts",
+      "clean_key": "fas_sts",
+      "group": "fas",
+      "intent": "Fas system status",
+      "description": ""
+    },
+    {
+      "raw_key": "fas.healthStatus",
+      "clean_key": "fas.healthStatus",
+      "group": "fas",
+      "intent": "Fas health status",
+      "description": ""
+    }
+  ],
+  "timelock": [
+    {
+      "raw_key": "timeLock.powerStatus",
+      "clean_key": "timeLock.powerStatus",
+      "group": "timelock",
+      "intent": "Tls power status/Time Lock power status",
+      "description": ""
+    },
+    {
+      "raw_key": "timeLock_sts",
+      "clean_key": "timeLock_sts",
+      "group": "timelock",
+      "intent": "Tls system status",
+      "description": ""
+    },
+    {
+      "raw_key": "timeLockDoor",
+      "clean_key": "timeLockDoor",
+      "group": "timelock",
+      "intent": "Tls DOOR STATUS",
+      "description": ""
+    },
+    {
+      "raw_key": "timeLockHealth",
+      "clean_key": "timeLockHealth",
+      "group": "timelock",
+      "intent": "Tls health status",
+      "description": ""
+    }
+  ],
+  "access_control": [
+    {
+      "raw_key": "accessControl.powerStatus",
+      "clean_key": "accessControl.powerStatus",
+      "group": "access_control",
+      "intent": "Acs power status/access control power status",
+      "description": ""
+    },
+    {
+      "raw_key": "accessControl_sts",
+      "clean_key": "accessControl_sts",
+      "group": "access_control",
+      "intent": "Acs system status",
+      "description": ""
+    },
+    {
+      "raw_key": "accessControlDoor",
+      "clean_key": "accessControlDoor",
+      "group": "access_control",
+      "intent": "Acs door status",
+      "description": ""
+    },
+    {
+      "raw_key": "accessControlHealth",
+      "clean_key": "accessControlHealth",
+      "group": "access_control",
+      "intent": "Acs health status",
+      "description": ""
+    },
+    {
+      "raw_key": "accessControl.systemStatus",
+      "clean_key": "accessControl.systemStatus",
+      "group": "access_control",
+      "intent": "Acs system status",
+      "description": ""
+    }
+  ]
+}
