@@ -13,3 +13,22 @@ smoke_test.log
 
 # Generated harvest outputs (too bulky for git; re-pullable)
 data_harvest/
+
+# Generated training datasets (re-buildable from the database)
+training_data/
+
+# Harvest time-series checkpoints (bulky, re-fetchable)
+harvest_cache/
+
+# Run logs and crash dumps
+*.log
+hs_err_pid*.log
+
+# Large generated harvest outputs (re-buildable; too big for git)
+ts_daily_snapshots_*.csv
+ml_training_*.jsonl
+tb_audit_*.xlsx
+ts_summary_*.xlsx
+dashboard_data*.json
+
+

@@ -46,6 +46,23 @@ A Python/Jupyter-based system for scraping ThingsBoard devices, harvesting telem
 
 Open `TB_Full_Harvest_v11.ipynb` in Jupyter/VS Code and run the cells.
 
+#### Long-run safety (memory + resume)
+
+The 365-day fetch pulls ~821 keys × up to 5000 points for ~160 devices. Holding all of that in RAM is what used to kill the run silently at ~13/160 devices (no traceback — the OS reclaimed the process). Each device's payload is now written to `harvest_cache/ts/<device_id>.json.gz` as soon as it arrives, only a point-count summary stays in memory, and the alignment step streams one device at a time, so peak usage is one device instead of the whole fleet.
+
+- A crashed or cancelled run **resumes**: cached devices are skipped. `REFRESH_TS_CACHE=1` re-fetches them, `TS_CACHE_DIR` relocates the cache.
+- `harvest_cache/` is gitignored (bulky, re-fetchable).
+- Run it visibly or redirect the logs — a detached run produces no console output:
+
+```bash
+python -u -m papermill TB_Full_Harvest_v11.ipynb harvest_cache/TB_Full_Harvest_v11_executed.ipynb
+```
+
+Two failure modes worth knowing:
+
+1. `automate_harvest.bat` calls `.venv\Scripts\python.exe`, which currently has **no papermill installed**, so that job fails immediately with `ModuleNotFoundError`. It also runs papermill **in place**, so a crash (or the IDE autosaving its buffer) can leave the notebook half-executed. Install papermill into `.venv` and/or prefer the command above with a separate output notebook.
+2. A malformed first line in `.env` (any characters typed before `TB_HOST`) makes `python-dotenv` skip the line and the notebook dies at Cell 3 with `KeyError: 'TB_HOST'`. Keep `.env` to plain `KEY=value` lines; it must stay gitignored.
+
 ### Automated Daily Execution
 
 The `run_nightly_audit.py` script automates the notebook run:
@@ -86,9 +103,45 @@ Run folder contents:
 - `events_<type>.csv` (LC_EVENT, ERROR, STATS, DEBUG) and `alarms.csv` — outage ground truth
 - `manifest.json` — per-step rows/files/errors/timing
 
+### Build Training Data (leakage-free)
+
+`build_training_dataset.py` reads the Postgres tables (`public.device_telemetry`, `public.device_event`, hierarchy tables) and produces a point-in-time feature matrix for anomaly detection. It also *prepares* the 24-hour outage-risk label but refuses to invent it: without independent verified evidence, every sample is censored and no supervised model should be trained.
+
+```bash
+# connection string comes from the environment (never from a file in the repo)
+export TRAIN_DB_URL='postgresql+psycopg2://USER:PASSWORD@HOST:PORT/DB?sslmode=require'
+# ...or set PGHOST / PGPORT / PGDATABASE / PGUSER / PGPASSWORD
+
+python build_training_dataset.py --check-db          # verify connection + expected columns (read-only)
+python build_training_dataset.py --plan-only         # print the extraction plan, no DB calls
+python build_training_dataset.py --start 2026-01-01 --end 2026-04-01
+python build_training_dataset.py --skip-extract      # rebuild features from staged parquet
+python build_training_dataset.py --max-partitions 2 --max-devices 10   # smoke test
+```
+
+Outputs in `training_data/` (gitignored):
+
+- `anomaly_samples.parquet` — one row per device anchor: `device_id`, `anchor_ts`, feature columns, `eligibility`, `censor_reason`, `split` (plus `label_status`, `y_outage_24h`, `max_source_ts`)
+- `outage_evidence_audit.parquet` — `device_id`, `evidence_ts`, `evidence_type`, `evidence_strength`, `source_event_id`, `observed_at`, `redacted_evidence_reference` (no raw payloads or values)
+- `data_quality_report.md` / `data_quality_metrics.json` — coverage, quarantine reasons, parse failures, missingness/freshness, duplicates, latency, weak-evidence counts, censored-vs-eligible counts, split balance
+
+Configuration: `training_config.json` (windows, exclusions, label rules, splits, purge gap).
+
+Guarantees:
+
+- **Read-only DB access.** Every statement must be `SELECT`/`WITH`, and the session opens with `default_transaction_read_only = on`.
+- **Bounded extraction.** Daily partitions × key batches with a per-query row cap; the hypertable is never aggregated whole.
+- **Point-in-time features.** A row at anchor `T` uses only records with `time <= T`; `max_source_ts` is recorded per sample and asserted ≤ `anchor_ts` (`--no-strict-leakage-check` to disable the strict guard).
+- **Capped imputation.** Carry-forward stops after `fill_cap_hours`; beyond that the value is NaN and `*__last_age_h` / `*__stale` remain.
+- **Exclusions.** Identifiers (`device_id`, `imei`, `ip`), GPS, secrets, raw payloads, rule-derived scores, severity/alarm flags and target-like attributes never become features.
+- **Chronological, grouped, purged splits.** Customers/branches/devices stay in one split; purge bands are cut at the midpoint between adjacent splits so no label horizon or feature window overlaps.
+- **Labels only from verified evidence.** Lifecycle connect/disconnect events and offline/no-data alarms are strong evidence. `device_event.payload.data.currentAttr` and other state snapshots are *weak* evidence and can never create a positive label.
+
+If no verified evidence exists, the run exits with code `3` and prints a clear **STOP** notice; use the `anomaly_eligible == True` rows for unsupervised anomaly detection in the meantime. Tests: `python -m pytest tests -q` (44 tests, including a proof that no post-anchor data can enter a feature row).
+
 ### Key Spec (new telemetry key document)
 
-The key-update document (`Untitled document (1).docx` / `.pdf`, same content) defines the new namespaced key spec (`gateway.*`, `cctv.*`/`rock.*`, `system_status.*`, `basSystemIntegration.*`, `timeLock.*`, `accessControl.*`). Tooling around it:
+The key-update document (`key_spec_update.docx` / `.pdf`, same content) defines the new namespaced key spec (`gateway.*`, `cctv.*`/`rock.*`, `system_status.*`, `basSystemIntegration.*`, `timeLock.*`, `accessControl.*`). Tooling around it:
 
 ```bash
 python build_key_spec_manifest.py        # doc -> key_spec_manifest.csv/.json + key_spec_aliases.json

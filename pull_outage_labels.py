@@ -1,16 +1,22 @@
 #!/usr/bin/env python
-"""Pull real-ish outage labels from ThingsBoard.
+"""Collect outage EVIDENCE from ThingsBoard (not verified labels).
 
-The existing harvest produces heuristic fault labels. This script builds a
-separate outage-label dataset with columns suitable for supervised training:
+This script is an evidence collector only. Its output is a candidate list with a
+`confidence` column and must NOT be treated as ground truth:
 
-    device_id, offline_start, offline_end, reconnect_time, outage_reason
+* `source=event` / `source=alarm` rows are the strongest candidates (lifecycle
+  connect/disconnect and offline/no-data alarms).
+* `source=timeseries_state` and especially `source=current_attributes` are WEAK
+  evidence - `current_attributes` is a timestamped snapshot of `active`/`status`/
+  `lastConnectTime`, not a historical outage, and single-row state can be wrong.
 
-It tries, in order:
-1. ThingsBoard device events (connect/disconnect/activity/inactivity).
-2. ThingsBoard alarms whose type/details look like offline/no-data alarms.
-3. Timeseries state transitions from discovered connectivity keys.
-4. Current device-state attributes for still-open outages.
+The authoritative training dataset is built by `build_training_dataset.py`, which
+writes `outage_evidence_audit.parquet`, only accepts strong evidence as verified,
+and censors every sample that lacks independent coverage. Use this script to
+inspect what evidence exists, not to create `y_outage` labels.
+
+Output columns: device_id, offline_start, offline_end, reconnect_time,
+outage_reason, source, source_key, source_event_id, duration_sec, confidence, raw.
 
 Credentials are read from .env/environment:
     TB_HOST, TB_EMAIL, TB_PASSWORD

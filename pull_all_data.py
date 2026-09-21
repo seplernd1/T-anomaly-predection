@@ -421,6 +421,7 @@ def pull_events(
     page_size: int,
     delay: float,
     result: StepResult,
+    out_dir: Path | None = None,
 ) -> None:
     by_type: dict[str, list[dict[str, Any]]] = {et: [] for et in event_types}
     for d in devices:
@@ -467,6 +468,7 @@ def pull_alarms(
     page_size: int,
     delay: float,
     result: StepResult,
+    out_dir: Path | None = None,
 ) -> None:
     rows: list[dict[str, Any]] = []
     for d in devices:
@@ -619,7 +621,9 @@ def main(argv: list[str]) -> int:
         "host": host,
         "telemetry_days": args.telemetry_days,
         "events_days": args.events_days,
+        # `window` is the events/alarms window; telemetry uses its own (below).
         "window": {"start": utc_iso(events_start_ms), "end": utc_iso(end_ms)},
+        "telemetry_window": {"start": utc_iso(telemetry_start_ms), "end": utc_iso(end_ms)},
         "steps": {},
     }
 
@@ -737,7 +741,7 @@ def main(argv: list[str]) -> int:
 
         def step_events(result: StepResult) -> None:
             pull_events(client, devices, event_types, events_start_ms, end_ms,
-                        args.page_size, args.request_delay, result)
+                        args.page_size, args.request_delay, result, out_dir)
 
         run_step("events", step_events)
 
@@ -745,7 +749,7 @@ def main(argv: list[str]) -> int:
     if not args.skip_alarms:
 
         def step_alarms(result: StepResult) -> None:
-            pull_alarms(client, devices, events_start_ms, end_ms, args.page_size, args.request_delay, result)
+            pull_alarms(client, devices, events_start_ms, end_ms, args.page_size, args.request_delay, result, out_dir)
 
         run_step("alarms", step_alarms)
 

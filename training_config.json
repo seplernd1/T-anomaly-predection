@@ -1,0 +1,140 @@
+{
+  "_readme": [
+    "Configuration for build_training_dataset.py (leakage-free training data).",
+    "Nothing here contains credentials. The DB connection string is read from the",
+    "environment variable named in db.url_env (default TRAIN_DB_URL), or from the",
+    "standard PG* variables. Never commit a connection string to this file.",
+    "All extraction is bounded to daily partitions; nothing scans the whole hypertable."
+  ],
+
+  "db": {
+    "url_env": "TRAIN_DB_URL",
+    "statement_timeout_ms": 900000,
+    "lock_timeout_ms": 30000,
+    "idle_in_transaction_timeout_ms": 60000
+  },
+
+  "tables": {
+    "telemetry": "public.device_telemetry",
+    "events": "public.device_event",
+    "hierarchy_node": "public.hierarchy_node",
+    "branch_identity": "public.branch_identity",
+    "branch_ancestor_path": "public.branch_ancestor_path",
+    "customer": "public.customer"
+  },
+
+  "columns": {
+    "time": "time",
+    "device_id": "device_id",
+    "key": "key",
+    "tenant_id": "tenant_id",
+    "customer_id": "customer_id",
+    "value_num": "value_num",
+    "value_text": "value_text",
+    "event_pk": "id",
+    "event_id": "event_id",
+    "event_type": "event_type",
+    "event_payload": "payload"
+  },
+
+  "extraction": {
+    "window_days": 1,
+    "key_batch_size": 8,
+    "device_batch_size": 50,
+    "row_cap_per_query": 750000,
+    "on_row_cap": "error",
+    "key_discovery": "per_day_aggregate",
+    "static_keys": [],
+    "max_partitions": null,
+    "quarantine": {
+      "min_valid_ts": "2000-01-01T00:00:00+00:00",
+      "future_slack_hours": 6
+    }
+  },
+
+  "anchors": {
+    "every_hours": 6,
+    "min_history_hours": 12,
+    "align_utc": true
+  },
+
+  "features": {
+    "numeric_windows_hours": [1, 6, 24, 168],
+    "text_windows_hours": [24],
+    "expected_interval_s": 300,
+    "min_count_for_stats": 6,
+    "fill_cap_hours": 6,
+    "stale_after_hours": 24,
+    "max_feature_keys": 25,
+    "max_text_keys": 8,
+    "watchlist_keys": [],
+    "force_include_keys": [],
+    "force_exclude_keys": []
+  },
+
+  "exclusions": {
+    "_readme": "Applied to telemetry keys AND to generated feature names. First match wins.",
+    "patterns": [
+      ["(^|_)(device|tenant|customer|branch|org|gateway|node|site)_?id$", "identifier"],
+      ["(^|_)(device|branch|zone|customer|nbg|zo|ro|ho|co)_?name$", "identifier"],
+      ["title|formatted", "identifier"],
+      ["imei|iccid|mac_?address|serial|hostname|ip_address|^ip$|tailscale", "network_identifier"],
+      ["password|passwd|secret|token|api_?key|credential|private_?key|webhook|slack", "secret"],
+      ["latitude|longitude|^lat$|^lon$|arrlat|arrlon|^gps|_gps|geo", "gps_location"],
+      ["payload|raw|dexter_config|dexter_date|camerainfo|hddis|sd_card_info|sdinfo|integration|^rock$", "raw_payload"],
+      ["fault_?score|health_?score|risk|prognosis|prediction|anomaly|_score$|^score", "rule_derived_score"],
+      ["severity|critical|major|warning|alarm|^active$|active_state|notification", "alert_or_severity"],
+      ["lastconnect|lastdisconnect|lastactivity|inactiv|offline|outage|^y_|^label|^target|downtime|panelstate|triggered|tamper|heartbeat", "target_like_or_label_proxy"],
+      ["status|systemhealth|provisionstate|subsystem|^health", "derived_status_flag"],
+      ["usage_history|history|_res$|^res$", "history_or_result_blob"]
+    ]
+  },
+
+  "labels": {
+    "_readme": [
+      "Verified outage labels require an independent source (lifecycle events or alarms).",
+      "Current-attribute snapshots (including event payload currentAttr) are WEAK evidence only",
+      "and can never create a positive y_outage_24h label."
+    ],
+    "horizon_hours": 24,
+    "min_outage_minutes": 5,
+    "require_closed_windows": true,
+    "event_types_of_interest": ["LC_EVENT", "ERROR", "ALARM", "ALARM_UPDATE"],
+    "lifecycle_offline_methods": ["ondisconnect", "disconnect", "inactive", "offline"],
+    "lifecycle_online_methods": ["onconnect", "connect", "onactivity", "activity"],
+    "offline_regex": "offline|no[_ -]?data|inactiv|disconnect|heartbeat[_ -]?stop|down|not responding",
+    "online_regex": "online|connected|activity|restored|reconnect|up",
+    "evidence_strength": {
+      "lc_disconnect": "strong",
+      "lc_connect": "strong",
+      "alarm_offline": "strong",
+      "alarm_cleared": "strong",
+      "error_event": "weak",
+      "current_attr_snapshot": "weak",
+      "unknown": "none"
+    },
+    "negative_requires_device_evidence": true,
+    "min_device_evidence_span_days": 7,
+    "payload_key_allowlist": [
+      "method", "status", "state", "msg", "message", "type", "event",
+      "currentAttr", "active", "lastConnectTime", "lastDisconnectTime",
+      "inactiveSince", "inactiveReason", "alarmType", "error", "errorCode"
+    ]
+  },
+
+  "splits": {
+    "mode": "group",
+    "group_by": "customer",
+    "fractions": { "train": 0.7, "validation": 0.15, "test": 0.15 },
+    "purge_hours": "auto"
+  },
+
+  "output": {
+    "dir": "training_data",
+    "anomaly_samples": "anomaly_samples.parquet",
+    "evidence_audit": "outage_evidence_audit.parquet",
+    "report_md": "data_quality_report.md",
+    "metrics_json": "data_quality_metrics.json",
+    "staging_dir": "staging"
+  }
+}
