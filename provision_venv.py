@@ -45,6 +45,7 @@ IMPORT_NAMES = {
     "tqdm": "tqdm",
     "openpyxl": "openpyxl",
     "papermill": "papermill",
+    "ipykernel": "ipykernel",
     "pytest": "pytest",
 }
 
