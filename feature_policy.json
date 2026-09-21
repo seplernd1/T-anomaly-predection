@@ -1,0 +1,32 @@
+{
+  "_readme": [
+    "Machine-readable feature governance for build_anomaly_dataset.py.",
+    "Default-deny: unknown telemetry keys are EXCLUDED unless listed in allowlist.",
+    "Denylist patterns are checked BEFORE feature generation and again on the",
+    "final output columns (fail-closed). Add reviewed sensor/measurement keys",
+    "to allowlist with the lead's sign-off; never add identifiers, GPS,",
+    "secrets, payloads, statuses, scores, or label proxies."
+  ],
+  "default_allow_unknown": false,
+  "allowlist": [],
+  "denylist_patterns": [
+    ["(^|_)(device|tenant|customer|branch|org|gateway|node|site)_?id$", "identifier"],
+    ["(^|_)(device|branch|zone|customer|nbg|zo|ro|ho|co)_?name$", "identifier"],
+    ["title|formatted", "identifier"],
+    ["imei|iccid|mac_?address|serial|hostname|ip_address|^ip$|tailscale", "network_identifier"],
+    ["password|passwd|secret|token|api_?key|credential|private_?key|webhook|slack", "secret"],
+    ["latitude|longitude|^lat$|^lon$|arrlat|arrlon|^gps|_gps|geo", "gps_location"],
+    ["payload|raw|dexter_config|dexter_date|camerainfo|hddis|sd_card_info|sdinfo|integration|^rock$", "raw_payload"],
+    ["fault_?score|health_?score|risk|prognosis|prediction|anomaly|_score$|^score", "rule_derived_score"],
+    ["severity|critical|major|warning|alarm|^active$|active_state|notification", "alert_or_severity"],
+    ["lastconnect|lastdisconnect|lastactivity|inactiv|offline|outage|^y_|^label|^target|downtime|panelstate|triggered|tamper|heartbeat", "target_like_or_label_proxy"],
+    ["status|systemhealth|provisionstate|subsystem|^health", "derived_status_flag"],
+    ["usage_history|history|_res$|^res$", "history_or_result_blob"]
+  ],
+  "prohibited_output_columns": [
+    "fault.?score", "severity", "critical", "major", "warning", "alarm",
+    "label", "target", "^y_", "risk", "prognosis", "prediction", "anomaly",
+    "imei", "mac", "serial", "latitude", "longitude", "password", "secret", "token",
+    "payload", "heartbeat", "offline", "outage", "^active$", "status$"
+  ]
+}

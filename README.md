@@ -79,29 +79,47 @@ This will:
 
 ### Pull ALL Data (One Command)
 
-`pull_all_data.py` is a single orchestrator that pulls every data type from the tenant into one timestamped run folder (`data_harvest/all_data_<ts>/`) with a `manifest.json` recording row counts and per-step errors:
+`pull_all_data.py` is a single orchestrator that pulls every data type from the tenant into a versioned run folder (`data_harvest/runs/<run_id>/`) with a `manifest.json` recording row counts and per-step errors. Telemetry uses retried, window-split fetching with per device/key coverage records and checkpoints; a 5000-point (cap-sized) response is treated as truncated until proven otherwise.
 
 ```bash
-python pull_all_data.py                          # full run: registry, relations, attributes,
-                                                 # telemetry keys + series, events, alarms
-python pull_all_data.py --telemetry-days 90      # limit telemetry lookback
+pip install -r requirements.txt                  # ambient 3.14 has everything; .venv does NOT
 python pull_all_data.py --plan-only              # show what would run, fetch nothing
 python pull_all_data.py --max-devices 5 --max-keys-per-device 2   # smoke test
 python pull_all_data.py --device-offset 30 --max-devices 3        # sample specific devices
+python pull_all_data.py --telemetry-days 90      # limit telemetry lookback
 python pull_all_data.py --all-asset-relations    # also walk standalone asset trees
+python pull_all_data.py --resume-from <run_id>   # resume: frozen window, skip done chunks
+python pull_all_data.py --allow-partial          # exit 0 despite incomplete windows (default: exit 5)
 ```
 
-Useful flags: `--skip-telemetry`, `--skip-events`, `--skip-alarms`, `--skip-relations`, `--key-filter "active|heartbeat"` (regex on telemetry keys).
+TLS is verified by default. This tenant uses a private cert, so passes need `--insecure-skip-tls-verify` (or `TB_INSECURE_TLS=1`) until the cert is fixed — the flag prints a warning.
 
-Run folder contents:
+Useful flags: `--skip-telemetry`, `--skip-events`, `--skip-alarms`, `--skip-relations`, `--key-filter "active|heartbeat"` (regex on telemetry keys), `--min-chunk-hours`, `--max-retries`, `--run-id`.
 
-- `devices.csv` / `customers.csv` / `assets.csv` — entity registry
-- `relations.csv` — bank → branch → device graph (walked per device)
-- `device_attributes.csv` — all scopes (SERVER/CLIENT/SHARED) incl. connectivity keys
-- `device_telemetry_keys.csv` — discovered telemetry keys per device
-- `telemetry/telemetry_<device_id>.csv` — timeseries per device (device_id, key, ts, ts_iso, value)
-- `events_<type>.csv` (LC_EVENT, ERROR, STATS, DEBUG) and `alarms.csv` — outage ground truth
-- `manifest.json` — per-step rows/files/errors/timing
+Run folder contents (`registry/`, `telemetry/`, `events/`, `alarms/`, `coverage/`, `quarantine/`, `reports/`):
+
+- `registry/devices.csv` (+`customers.csv`, `assets.csv`) — entity registry with `eligible`, `eligibility_reason`, retrieval metadata
+- `registry/relations.csv` — bank → branch → device graph (walked per device)
+- `registry/device_attributes.csv` — all scopes (SERVER/CLIENT/SHARED) incl. connectivity keys
+- `registry/device_telemetry_keys.csv` — discovered telemetry keys per device
+- `telemetry/telemetry_<device_id>.parquet` — timeseries per device (device_id, raw_key, key, ts, ts_iso, value)
+- `events/events_<type>.csv` (LC_EVENT, ERROR, STATS, DEBUG) and `alarms/alarms.csv` — outage evidence
+- `coverage/telemetry_coverage.jsonl` + `source_coverage.jsonl` + `checkpoints.json` — per device/key/window provenance and resume state
+- `reports/device_exclusions.csv`, `reports/completeness.json` — eligibility audit and run completeness
+- `manifest.json` — per-step rows/files/errors/timing, both windows, coverage summary
+
+Device eligibility (`REAL_DEVICE_*` env: name patterns, `REAL_DEVICE_REQUIRE_CUSTOMER`, `REAL_DEVICE_MIN_KEYS`, allow/deny lists) classifies real vs test/demo/simulator devices with per-device reasons; only eligible devices are pulled.
+
+### Build Anomaly Dataset (raw telemetry only)
+
+`build_anomaly_dataset.py` builds the unsupervised anomaly dataset from a pull run's validated parquet — never from the rule-derived notebook exports. Default-deny feature policy (`feature_policy.json`): unknown keys are excluded until the lead allowlists reviewed sensor keys.
+
+```bash
+python build_anomaly_dataset.py --run-dir data_harvest/runs/<run_id> --plan-only
+python build_anomaly_dataset.py --run-dir data_harvest/runs/<run_id>
+```
+
+Outputs in `training_data/anomaly_<run_id>/`: `anomaly_features.parquet`, `scaler.json` (fit on train only), `feature_dictionary.csv`, `data_card.md`, `exclusion_report.json`, `split_report.json`.
 
 ### Build Training Data (leakage-free)
 

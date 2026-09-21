@@ -104,17 +104,32 @@
     "lifecycle_online_methods": ["onconnect", "connect", "onactivity", "activity"],
     "offline_regex": "offline|no[_ -]?data|inactiv|disconnect|heartbeat[_ -]?stop|down|not responding",
     "online_regex": "online|connected|activity|restored|reconnect|up",
+    "alarm_offline_regex": "off|disconnect|fault|low battery|power fail|activated",
+    "alarm_online_regex": "cleared|restored|reconnect",
+    "_alarm_semantics": [
+      "alarm_offline_regex/alarm_online_regex classify whole-device alarms.",
+      "Camera-channel alarms (CAMERA TAMPER/DISCONNECT CH n) classify as",
+      "alarm_channel (weak) BEFORE these regexes and never close outages.",
+      "The alarms_bridge emits ALARM ACTIVATED at startTs and ALARM CLEARED at clearTs; ackTs is never present."
+    ],
     "evidence_strength": {
       "lc_disconnect": "strong",
       "lc_connect": "strong",
       "alarm_offline": "strong",
       "alarm_cleared": "strong",
+      "alarm_channel": "weak",
       "error_event": "weak",
       "current_attr_snapshot": "weak",
       "unknown": "none"
     },
     "negative_requires_device_evidence": true,
     "min_device_evidence_span_days": 7,
+    "require_source_coverage": true,
+    "source_coverage": {
+      "_readme": "Per-device label-source coverage gate: negatives require the label source to have been queried successfully over the device's evidence span; stale history censors.",
+      "events": { "expected": false, "note": "TB events retention disabled on this tenant; alarms bridge is the primary source" },
+      "alarms": { "expected": true, "min_days": 30 }
+    },
     "payload_key_allowlist": [
       "method", "status", "state", "msg", "message", "type", "event",
       "currentAttr", "active", "lastConnectTime", "lastDisconnectTime",

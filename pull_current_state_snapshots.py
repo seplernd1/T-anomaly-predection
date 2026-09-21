@@ -265,7 +265,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--verify-tls",
         action="store_true",
         default=bool_env("TB_VERIFY_TLS", False),
-        help="Verify TLS certificates. Default follows TB_VERIFY_TLS, otherwise false.",
+        help="Legacy flag: verify TLS certificates (now the default; kept for compatibility).",
+    )
+    parser.add_argument(
+        "--insecure-skip-tls-verify",
+        action="store_true",
+        default=False,
+        help="Explicit opt-in to DISABLE TLS verification (or TB_INSECURE_TLS=1).",
     )
     return parser.parse_args(argv)
 
@@ -289,8 +295,12 @@ def main(argv: list[str]) -> int:
     jsonl_path = Path(args.jsonl_output) if args.jsonl_output else None
     recovery_path = Path(args.recovery_output)
 
+    from tb_resilient import resolve_verify_tls
+
+    verify_tls = resolve_verify_tls(bool(args.insecure_skip_tls_verify), bool(args.verify_tls))
+    print(f"TLS verify={'on' if verify_tls else 'OFF-INSECURE'}")
     snapshot_ms = int(datetime.now(tz=timezone.utc).timestamp() * 1000)
-    client = ThingsBoardClient(host, email, password, verify_tls=args.verify_tls)
+    client = ThingsBoardClient(host, email, password, verify_tls=verify_tls)
     fetch_limit = None
     if args.max_devices is not None:
         fetch_limit = max(args.device_offset, 0) + args.max_devices

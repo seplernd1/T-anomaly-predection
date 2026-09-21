@@ -240,11 +240,21 @@ class ThingsBoardClient:
             "Content-Type": "application/json",
         }
 
-    def get_json(self, path: str, timeout: int = 30) -> Any:
+    def get_json(self, path: str, timeout: int = 30, retries: int = 4) -> Any:
+        from tb_resilient import AuthError, PermanentError, RetryExhaustedError, RetryPolicy, http_get
+
         url = path if path.startswith("http") else f"{self.host}{path}"
-        resp = self.session.get(url, headers=self.headers, timeout=timeout)
-        if resp.status_code == 401:
+        try:
+            resp, _ = http_get(self.session, url, self.headers, timeout,
+                               RetryPolicy(max_attempts=max(1, retries)))
+        except AuthError:
             raise RuntimeError("JWT expired or unauthorized")
+        except PermanentError as exc:
+            if exc.status in {404, 405}:
+                return None
+            raise RuntimeError(f"GET {url} failed HTTP {exc.status}: {exc.body}")
+        except RetryExhaustedError as exc:
+            raise RuntimeError(f"GET {url} failed after retries (last={exc.status}): {exc.body}")
         if resp.status_code in {404, 405}:
             return None
         if resp.status_code != 200:
@@ -495,10 +505,12 @@ def build_alarm_labels(device: dict[str, Any], alarms: list[dict[str, Any]]) -> 
         )
         if not start_ms:
             continue
+        # ackTs is acknowledgement, NEVER outage recovery: only end/clear
+        # timestamps (or independently observed reconnect evidence) close
+        # an outage. Without them the window stays open (end_ms=None).
         end_ms = (
             parse_time_to_ms(alarm.get("endTs"))
             or parse_time_to_ms(alarm.get("clearTs"))
-            or parse_time_to_ms(alarm.get("ackTs"))
         )
         alarm_id = ""
         if isinstance(alarm.get("id"), dict):
@@ -716,7 +728,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--verify-tls",
         action="store_true",
         default=bool_env("TB_VERIFY_TLS", False),
-        help="Verify TLS certificates. Default follows TB_VERIFY_TLS, otherwise false.",
+        help="Legacy flag: verify TLS certificates (now the default; kept for compatibility).",
+    )
+    parser.add_argument(
+        "--insecure-skip-tls-verify",
+        action="store_true",
+        default=False,
+        help="Explicit opt-in to DISABLE TLS verification (or TB_INSECURE_TLS=1).",
     )
     return parser.parse_args(argv)
 
@@ -742,7 +760,11 @@ def main(argv: list[str]) -> int:
     output = args.output or f"outage_labels_{stamp}.csv"
     jsonl_output = args.jsonl_output or ""
 
-    client = ThingsBoardClient(host, email, password, verify_tls=args.verify_tls)
+    from tb_resilient import resolve_verify_tls
+
+    verify_tls = resolve_verify_tls(bool(args.insecure_skip_tls_verify), bool(args.verify_tls))
+    print(f"TLS verify={'on' if verify_tls else 'OFF-INSECURE'}")
+    client = ThingsBoardClient(host, email, password, verify_tls=verify_tls)
     fetch_limit = None
     if args.max_devices is not None:
         fetch_limit = max(args.device_offset, 0) + args.max_devices

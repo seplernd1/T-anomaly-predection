@@ -1,0 +1,17 @@
+[project]
+name = "data-scrapping-thgingsboard-ml-intern"
+version = "0.1.0"
+requires-python = ">=3.13"
+dependencies = [
+    "requests==2.33.0",
+    "pandas==3.0.0",
+    "numpy==2.4.6",
+    "pyarrow==24.0.0",
+    "sqlalchemy==2.0.51",
+    "psycopg2-binary==2.9.12",
+    "python-dotenv==1.2.2",
+    "tqdm==4.67.3",
+    "openpyxl==3.1.5",
+    "papermill==2.7.0",
+    "pytest==9.0.2",
+]

@@ -106,6 +106,8 @@ R_HORIZON_INCOMPLETE = "future_label_coverage_incomplete"
 R_INSIDE_OUTAGE = "inside_verified_outage"
 R_PURGE = "split_purge_gap"
 R_NOT_READY = "features_unusable"
+R_NO_SOURCE_COVERAGE = "no_label_source_coverage_for_device"
+R_STALE_SOURCE = "label_source_history_stale"
 
 SPLIT_TRAIN = "train"
 SPLIT_VALIDATION = "validation"
@@ -187,17 +189,24 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "lifecycle_online_methods": ["onconnect", "connect", "onactivity", "activity"],
         "offline_regex": "offline|no[_ -]?data|inactiv|disconnect|heartbeat[_ -]?stop|down",
         "online_regex": "online|connected|activity|restored|reconnect|up",
+        "alarm_offline_regex": "off|disconnect|fault|low battery|power fail|activated",
+        "alarm_online_regex": "cleared|restored|reconnect",
         "evidence_strength": {
             "lc_disconnect": STRONG,
             "lc_connect": STRONG,
             "alarm_offline": STRONG,
             "alarm_cleared": STRONG,
+            "alarm_channel": WEAK,
             "error_event": WEAK,
             "current_attr_snapshot": WEAK,
             "unknown": NO_EVIDENCE,
         },
         "negative_requires_device_evidence": True,
         "min_device_evidence_span_days": 7,
+        "require_source_coverage": True,
+        "source_coverage": {
+            "alarms": {"min_days": 30},
+        },
         "payload_key_allowlist": ["method", "status", "msg", "type", "currentAttr"],
     },
     "splits": {
@@ -532,6 +541,35 @@ def find_exclusion_violations(feature_columns: Sequence[str], cfg: dict[str, Any
         if reason:
             hits.append((col, reason))
     return hits
+
+
+# Extra fail-closed patterns for the FINAL output frame: rule-derived scores,
+# severities, labels/targets and sensitive identifiers must never reach an ML
+# artifact even if key selection changed upstream.
+PROHIBITED_OUTPUT_PATTERNS = (
+    (re.compile(r"fault.?score|health.?score|_score$|^score", re.I), "rule_derived_score"),
+    (re.compile(r"severity|critical|major|warning", re.I), "alert_or_severity"),
+    (re.compile(r"(^|_)y_|^label|^target|outage_24h", re.I), "label_or_target"),
+    (re.compile(r"risk|prognosis|prediction|anomaly", re.I), "rule_derived_score"),
+    (re.compile(r"imei|iccid|mac_?address|serial|password|secret|token|api_?key", re.I), "sensitive_identifier"),
+    (re.compile(r"latitude|longitude|^lat$|^lon$|_gps|^gps", re.I), "gps_location"),
+    (re.compile(r"payload|^raw$", re.I), "raw_payload"),
+)
+
+
+def assert_no_prohibited_features(frame: pd.DataFrame, cfg: dict[str, Any]) -> None:
+    """Fail-closed guard on the final ML frame. Raises TrainingDataError."""
+    feature_cols = [c for c in frame.columns if c not in META_COLUMNS]
+    violations = find_exclusion_violations(feature_cols, cfg)
+    for col in feature_cols:
+        for rx, reason in PROHIBITED_OUTPUT_PATTERNS:
+            if rx.search(col):
+                violations.append((col, reason))
+    if violations:
+        raise TrainingDataError(
+            "prohibited columns would reach ML output: "
+            + ", ".join(f"{c}({r})" for c, r in violations)
+        )
 
 
 def safe_name(key: str) -> str:
@@ -1124,6 +1162,10 @@ def _payload_method(payload: dict[str, Any]) -> str:
     return ""
 
 
+# Camera-channel alarms are per-video-channel, not device-level outages.
+CAMERA_CHANNEL_RE = re.compile(r"^CAMERA\s+(TAMPER|DISCONNECT)", re.I)
+
+
 def classify_event_evidence(row: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any] | None:
     """Map one device_event row to an evidence record. Raw values are discarded."""
     labels_cfg = cfg["labels"]
@@ -1140,11 +1182,37 @@ def classify_event_evidence(row: dict[str, Any], cfg: dict[str, Any]) -> dict[st
         elif method in [m.lower() for m in labels_cfg["lifecycle_online_methods"]]:
             evidence_type = "lc_connect"
     elif event_type.startswith("ALARM"):
-        blob = " ".join(str(payload.get(k, "")) for k in ("type", "status", "msg", "message", "alarmType"))
-        if offline_re.search(blob) and not online_re.search(blob):
-            evidence_type = "alarm_offline"
-        elif online_re.search(blob):
-            evidence_type = "alarm_cleared"
+        blob = " ".join(
+            str(payload.get(k, "")) for k in ("type", "status", "msg", "message", "alarmType", "state")
+        )
+        if str(payload.get("bridge", "")).startswith("alarm_csv_bridge"):
+            # Bridged alarm rows carry controlled semantics: the bridge already
+            # decided activation (startTs) vs clearing (clearTs), so classify
+            # on scope/state — never re-parse the raw status (a status like
+            # CLEARED_UNACK would wrongly clear the activation row too).
+            if payload.get("scope") == "not_device_outage" or CAMERA_CHANNEL_RE.match(
+                str(payload.get("type", ""))
+            ):
+                evidence_type = "alarm_channel"
+            elif "ACTIVATED" in str(payload.get("state", "")).upper():
+                evidence_type = "alarm_offline"
+            elif "CLEARED" in str(payload.get("state", "")).upper():
+                evidence_type = "alarm_cleared"
+        elif CAMERA_CHANNEL_RE.match(blob):
+            # A camera-channel alarm (CAMERA TAMPER/DISCONNECT CH n) describes
+            # one video channel — NOT device availability. Classified
+            # separately; the default config marks it weak evidence.
+            evidence_type = "alarm_channel"
+        else:
+            # Whole-device alarms use dedicated alarm regexes (an alarm type
+            # like "DVR/NVR OFF" does not contain the word "offline"), and a
+            # cleared alarm legitimately contains both markers.
+            alarm_offline_re = re.compile(labels_cfg.get("alarm_offline_regex"), re.I) if labels_cfg.get("alarm_offline_regex") else offline_re
+            alarm_online_re = re.compile(labels_cfg.get("alarm_online_regex"), re.I) if labels_cfg.get("alarm_online_regex") else online_re
+            if alarm_offline_re.search(blob) and not alarm_online_re.search(blob):
+                evidence_type = "alarm_offline"
+            elif alarm_online_re.search(blob):
+                evidence_type = "alarm_cleared"
     elif event_type == "ERROR":
         evidence_type = "error_event"
 
@@ -1290,11 +1358,20 @@ def label_samples(
     evidence: pd.DataFrame,
     coverage_end: pd.Timestamp,
     cfg: dict[str, Any],
+    source_coverage: dict[str, pd.DataFrame] | None = None,
 ) -> pd.DataFrame:
     """Attach `y_outage_24h` / `label_status` / `censor_reason`.
 
     A positive label requires verified (strong) evidence. Weak evidence and
     current-attribute snapshots can never produce a positive.
+
+    Per-device source-coverage gate: when ``source_coverage`` provides a
+    per-device ledger (columns ``device_id`` plus any of ``coverage_start``,
+    ``coverage_end``, ``status``), a negative is only allowed if the label
+    source was successfully queried over the device's evidence span. Devices
+    with no successful source query, or whose source history is stale
+    (stale_days_threshold before coverage_end), are censored — never labeled
+    negative merely because no evidence was returned.
     """
     labels_cfg = cfg["labels"]
     horizon_h = float(labels_cfg["horizon_hours"])
@@ -1312,6 +1389,47 @@ def label_samples(
     if verified is None or verified.empty:
         out.loc[out["censor_reason"].isna(), "censor_reason"] = R_NO_VERIFIED_SOURCE
         return out
+
+    # ── per-device label-source coverage gate ──────────────────────────────
+    # A negative label is only allowed when a label-source coverage ledger
+    # was collected AND the source was successfully queried for this device
+    # AND the source data stream is not stale. Missing/failed/stale coverage
+    # censors the anchor — it must never be read as "no outage happened".
+    # When NO ledger exists (legacy path / no bridge run), the gate is inert:
+    # the device-level evidence-span check below already guards negatives.
+    stale_days = float(
+        (cfg["labels"].get("source_coverage", {}) or {}).get("alarms", {}).get("min_days", 0) or 0
+    )
+    cov_ok: set[str] = set()
+    cov_data_newest: dict[str, pd.Timestamp] = {}
+    if source_coverage is not None:
+        for frame in source_coverage.values():
+            if frame is None or frame.empty or "device_id" not in frame.columns:
+                continue
+            for rec in frame.to_dict("records"):
+                dev = str(rec.get("device_id") or "")
+                if not dev:
+                    continue
+                if str(rec.get("status", "ok")).lower() not in {"ok", "complete", "success", "empty_verified"}:
+                    continue  # failed query: device never enters cov_ok
+                cov_ok.add(dev)
+                val = rec.get("data_newest")
+                if val is not None and not pd.isna(val):
+                    ts_new = pd.Timestamp(val)
+                    prev = cov_data_newest.get(dev)
+                    cov_data_newest[dev] = ts_new if prev is None or ts_new > prev else prev
+
+    require_gate = bool(cfg["labels"].get("require_source_coverage", True))
+
+    def _coverage_verdict(device: str) -> str | None:
+        if source_coverage is None or not require_gate:
+            return None
+        if device not in cov_ok:
+            return R_NO_SOURCE_COVERAGE
+        newest = cov_data_newest.get(device)
+        if newest is not None and stale_days > 0 and (coverage_end - newest) > timedelta(days=stale_days):
+            return R_STALE_SOURCE
+        return None
 
     spans = device_evidence_span_days(evidence)
     min_span = float(labels_cfg.get("min_device_evidence_span_days", 0) or 0)
@@ -1379,12 +1497,26 @@ def label_samples(
             values.append(1)
             continue
 
-        span_ok = True
-        if require_evidence:
-            if device not in spans.index:
-                span_ok = False
-            else:
-                span_ok = float(spans.loc[device, "span_days"]) >= min_span
+        coverage_reason = _coverage_verdict(device)
+        if coverage_reason is not None:
+            positive_flags.append(False)
+            statuses.append("censored")
+            reasons.append(coverage_reason)
+            values.append(pd.NA)
+            continue
+
+        if source_coverage is not None and require_gate:
+            # The per-device coverage ledger (query provenance + data recency)
+            # is the stronger signal and already passed — it satisfies the
+            # evidence-coverage requirement, which is only a proxy for it.
+            span_ok = True
+        else:
+            span_ok = True
+            if require_evidence:
+                if device not in spans.index:
+                    span_ok = False
+                else:
+                    span_ok = float(spans.loc[device, "span_days"]) >= min_span
         if not span_ok:
             positive_flags.append(False)
             statuses.append("censored")
@@ -1695,10 +1827,65 @@ def load_staging(
 
 
 def load_events_staging(staging_dir: Path) -> pd.DataFrame:
-    root = staging_dir / "events"
+    """Load device_event staging parquet written by extract_events()."""
+    root = Path(staging_dir) / "events"
     if not root.exists():
         return pd.DataFrame(columns=["id", "event_id", "device_id", "event_type", "time", "payload"])
-    return pd.read_parquet(root)
+    files = sorted(root.glob("day=*.parquet"))
+    if not files:
+        return pd.DataFrame(columns=["id", "event_id", "device_id", "event_type", "time", "payload"])
+    frames = [pd.read_parquet(f) for f in files]
+    return pd.concat(frames, ignore_index=True)
+
+
+def _load_bridged_alarm_events(staging_dir: Path) -> pd.DataFrame:
+    """Load alarm-bridge event rows produced by alarms_bridge.py (if any)."""
+    path = Path(staging_dir) / "events" / "alarms_as_events.parquet"
+    if not path.is_file():
+        return pd.DataFrame(columns=["id", "event_id", "device_id", "event_type", "time", "payload"])
+    return pd.read_parquet(path)
+
+
+def _load_alarm_source_coverage(staging_dir: Path) -> dict[str, pd.DataFrame] | None:
+    """Load the per-device label-source coverage ledger (if present).
+
+    Accepts either:
+    * ``events/alarm_source_coverage.csv`` (alarms_bridge output), or
+    * ``events/source_coverage.jsonl`` (copy of pull_all_data's
+      ``coverage/source_coverage.jsonl``).
+
+    pull_all_data's ledger marks a successful zero-row alarm query as
+    ``empty``. For this tenant that must NOT validate negative labels: the
+    alarm stream demonstrably went silent tenant-wide in 2026-03 while
+    devices kept operating, so absence of alarms is not proof of coverage.
+    Only devices whose query returned actual alarm rows (``complete``) count
+    as covered; zero-row devices censor via R_NO_SOURCE_COVERAGE.
+    """
+    events_dir = Path(staging_dir) / "events"
+    csv_path = events_dir / "alarm_source_coverage.csv"
+    jsonl_path = events_dir / "source_coverage.jsonl"
+    frame: pd.DataFrame | None = None
+    if csv_path.is_file():
+        frame = pd.read_csv(csv_path)
+    elif jsonl_path.is_file():
+        records = []
+        with jsonl_path.open(encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if line:
+                    try:
+                        records.append(json.loads(line))
+                    except Exception:
+                        continue
+        if records:
+            frame = pd.DataFrame(records)
+            frame = frame.rename(columns={"oldest": "data_oldest", "newest": "data_newest"})
+    if frame is None or frame.empty:
+        return None
+    for col in ("query_start", "query_end", "data_oldest", "data_newest", "window_start", "window_end"):
+        if col in frame.columns:
+            frame[col] = ensure_utc_series(frame[col])
+    return {"alarms": frame}
 
 
 def load_device_metadata(db: ReadOnlyDb, cfg: dict[str, Any]) -> dict[str, dict[str, str]]:
@@ -2073,6 +2260,13 @@ def run_pipeline(args: argparse.Namespace) -> int:
             events = extract_events(db, cfg, start, end, staging_dir, max_partitions=args.max_partitions)
         else:
             events = load_events_staging(staging_dir)
+
+        # ── consume bridged alarm evidence (alarms.csv -> event rows) ──
+        source_coverage = None if args.no_source_coverage_gate else _load_alarm_source_coverage(staging_dir)
+        alarm_rows = _load_bridged_alarm_events(staging_dir)
+        if not alarm_rows.empty:
+            events = pd.concat([events, alarm_rows], ignore_index=True) if not events.empty else alarm_rows
+            LOG.info("merged %d bridged alarm evidence rows", len(alarm_rows))
             key_stats_path = staging_dir / "key_stats.csv"
             key_stats = pd.read_csv(key_stats_path) if key_stats_path.exists() else pd.DataFrame()
             extraction = ExtractionResult(
@@ -2152,10 +2346,14 @@ def run_pipeline(args: argparse.Namespace) -> int:
 
         samples = assign_splits(samples, cfg)
         purge_h = resolve_purge_hours(cfg)
-        samples = label_samples(samples, windows, evidence, coverage_end, cfg)
+        samples = label_samples(
+            samples, windows, evidence, coverage_end, cfg,
+            source_coverage=source_coverage,
+        )
         samples = apply_eligibility(samples, cfg)
         samples = finalize_feature_frame(samples, cfg)
         verify_no_leakage(samples)
+        assert_no_prohibited_features(samples, cfg)
 
         samples_path = out_dir / cfg["output"]["anomaly_samples"]
         samples.to_parquet(samples_path, index=False)
@@ -2213,6 +2411,11 @@ def build_parser() -> argparse.ArgumentParser:
         action=argparse.BooleanOptionalAction,
         default=True,
         help="Raise if any record after the anchor reaches a feature row (default: on)",
+    )
+    parser.add_argument(
+        "--no-source-coverage-gate",
+        action="store_true",
+        help="Disable per-device label-source coverage gating (not recommended)",
     )
     parser.add_argument("--log-level", default="INFO")
     return parser

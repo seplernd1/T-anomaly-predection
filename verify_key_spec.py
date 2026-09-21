@@ -37,6 +37,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--request-delay", type=float, default=float(os.getenv("REQUEST_DELAY", "0.05")))
     parser.add_argument("--json", default="", help="Also dump raw key->device-count map to this JSON file.")
     parser.add_argument("--verify-tls", action="store_true", default=os.getenv("TB_VERIFY_TLS", "").lower() in {"1", "true", "yes"})
+    parser.add_argument("--insecure-skip-tls-verify", action="store_true", default=False,
+                        help="Explicit opt-in to DISABLE TLS verification (or TB_INSECURE_TLS=1).")
     return parser.parse_args(argv)
 
 
@@ -116,7 +118,11 @@ def main(argv: list[str]) -> int:
     manifest = list(csv.DictReader(open(args.manifest, encoding="utf-8")))
     print(f"Manifest: {len(manifest)} keys from {args.manifest}")
 
-    counts = scan_live_keys(host, email, password, args.page_size, args.request_delay, args.verify_tls)
+    from tb_resilient import resolve_verify_tls
+
+    verify_tls = resolve_verify_tls(bool(args.insecure_skip_tls_verify), bool(args.verify_tls))
+    print(f"TLS verify={'on' if verify_tls else 'OFF-INSECURE'}")
+    counts = scan_live_keys(host, email, password, args.page_size, args.request_delay, verify_tls)
     print(f"Distinct live keys on tenant: {len(counts)}")
 
     if args.json:
