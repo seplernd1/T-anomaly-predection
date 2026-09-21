@@ -27,4 +27,13 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           hf auth login --token $HF_TOKEN --add-to-git-credential
-          hf upload --repo-type dataset Seplenovaedge/Thingsbaord_dtaset_of_company . . --exclude ".git/*" --exclude ".github/*" --exclude ".venv/*"
+          hf upload --repo-type dataset Seplenovaedge/Thingsbaord_dtaset_of_company . . \
+            --exclude ".git/*" --exclude ".github/*" --exclude ".venv/*" \
+            --exclude ".env" --exclude "**/.env" --exclude ".env.*" \
+            --exclude "*.jsonl" --exclude "**/*.jsonl" \
+            --exclude "*.xlsx" --exclude "**/*.xlsx" \
+            --exclude "ts_daily_snapshots_*.csv" --exclude "**/ts_daily_snapshots_*.csv" \
+            --exclude "current_state_snapshots/*" --exclude "current_state_snapshots/**" \
+            --exclude "dashboard_data*.json" --exclude "**/dashboard_data*.json" \
+            --exclude "offline_recoveries.csv" \
+            --exclude "harvest_cache/**" --exclude "data_harvest/**" --exclude "training_data/**"
