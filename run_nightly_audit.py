@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-NOTEBOOK_PATH = "TB_Device_Audit_v7.ipynb"
+NOTEBOOK_PATH = "TB_Full_Harvest_v11.ipynb"
 OUTPUT_DIR    = Path("audit_reports")
 LOG_FILE      = OUTPUT_DIR / "audit_scheduler.log"
 TIMESTAMP     = datetime.now().strftime("%Y%m%d_%H%M")
@@ -24,11 +24,12 @@ logging.basicConfig(
 def run_notebook():
     logging.info(f"🚀 Starting nightly audit run: {TIMESTAMP}")
     try:
-        # Execute notebook headlessly using papermill
+        # Execute headlessly with papermill to a SEPARATE output notebook
+        # (never in-place: in-place execution corrupted the notebook on 2026-09-16)
         cmd = [
             sys.executable, "-m", "papermill",
             NOTEBOOK_PATH,
-            str(OUTPUT_DIR / f"TB_Audit_Executed_{TIMESTAMP}.ipynb"),
+            str(OUTPUT_DIR / f"TB_Harvest_Executed_{TIMESTAMP}.ipynb"),
             "--log-output",
             "--execution-timeout", "3600"  # 1 hour max
         ]
@@ -74,7 +75,7 @@ def send_summary(success):
             emsg["To"] = "animesh.choudhury@seple.in"
             
             # Attach the latest excel report
-            list_of_files = glob.glob("tb_device_audit_*.xlsx")
+            list_of_files = glob.glob("tb_audit_*.xlsx")
             if list_of_files:
                 latest_file = max(list_of_files, key=os.path.getctime)
                 with open(latest_file, 'rb') as f:

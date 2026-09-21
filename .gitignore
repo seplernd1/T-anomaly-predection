@@ -20,6 +20,22 @@ training_data/
 # Harvest time-series checkpoints (bulky, re-fetchable)
 harvest_cache/
 
+# Executed-notebook outputs (papermill writes here, never in-place)
+executed/
+audit_reports/
+
+# Tenant-derived snapshot data (never publish: device/branch identifiers)
+current_state_snapshots/*.csv
+current_state_snapshots/*.json
+
+# Executed-notebook outputs (papermill writes here, never in-place)
+executed/
+audit_reports/
+
+# Tenant-derived snapshot data (never publish: device/branch identifiers)
+current_state_snapshots/*.csv
+current_state_snapshots/*.json
+
 # Run logs and crash dumps
 *.log
 hs_err_pid*.log

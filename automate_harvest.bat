@@ -7,14 +7,20 @@ echo ====================================================
 
 cd /d "C:\workspace\Data_scrapping_thgingsboard_ml-intern"
 
-if not exist ".\.venv\Scripts\python.exe" (
-    echo [ERROR] Missing .venv\Scripts\python.exe
+rem Self-healing environment: create/repair .venv from requirements.txt
+rem (idempotent; a healthy env costs ~1s). Fails the run early if unrepairable.
+python provision_venv.py
+if %errorlevel% neq 0 (
+    echo [ERROR] .venv could not be provisioned - see output above
     exit /b 1
 )
 
 echo Running Jupyter Notebook...
-.\.venv\Scripts\python.exe -m papermill TB_Full_Harvest_v11.ipynb TB_Full_Harvest_v11.ipynb
-
+rem Execute to a SEPARATE output notebook: papermill in-place execution was the
+rem cause of the half-executed-notebook corruption seen on 2026-09-16.
+rem (papermill does not create the output folder itself.)
+if not exist "executed" mkdir "executed"
+.\.venv\Scripts\python.exe -m papermill TB_Full_Harvest_v11.ipynb executed\TB_Full_Harvest_v11_executed.ipynb
 if %errorlevel% neq 0 (
     echo [ERROR] Notebook execution failed!
     exit /b %errorlevel%

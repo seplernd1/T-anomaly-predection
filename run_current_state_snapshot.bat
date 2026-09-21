@@ -12,8 +12,10 @@ echo ==================================================== >> "%LOG_FILE%"
 echo Starting current-state snapshot: %date% %time% >> "%LOG_FILE%"
 echo ==================================================== >> "%LOG_FILE%"
 
-if not exist ".\.venv\Scripts\python.exe" (
-    echo [ERROR] Missing .venv\Scripts\python.exe >> "%LOG_FILE%"
+rem Self-healing environment: create/repair .venv from requirements.txt
+python provision_venv.py >> "%LOG_FILE%" 2>&1
+if %errorlevel% neq 0 (
+    echo [ERROR] .venv could not be provisioned >> "%LOG_FILE%"
     exit /b 1
 )
 
