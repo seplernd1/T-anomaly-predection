@@ -63,6 +63,7 @@ from tb_resilient import (
     RetryExhaustedError,
     RetryPolicy,
     atomic_write_bytes,
+    configure_pacing,
     http_get,
     resolve_verify_tls,
     resolve_window,
@@ -694,6 +695,9 @@ def main(argv: list[str]) -> int:
 
     verify_tls = resolve_verify_tls(args)
     retry_policy = RetryPolicy(max_attempts=max(1, args.max_retries))
+    # Global pacing: every HTTP attempt (pages, keys, devices, steps) is spaced
+    # by --request-delay so back-to-back page loops cannot trigger 429 storms.
+    configure_pacing(args.request_delay)
 
     resumed_from = ""
     prior_manifest: dict[str, Any] = {}
@@ -703,8 +707,17 @@ def main(argv: list[str]) -> int:
         if ckpt_path.is_file():
             import shutil as _shutil
             _shutil.copyfile(ckpt_path, coverage_dir / "checkpoints.json")
+            # Carry over prior telemetry data + coverage: a done-checkpoint
+            # must always point at files that exist in THIS run folder,
+            # otherwise resumed chunks would be skipped but never present.
+            prior_tele = prior / "telemetry"
+            if prior_tele.is_dir():
+                _shutil.copytree(prior_tele, tele_dir, dirs_exist_ok=True)
+            prior_cov = prior / "coverage" / "telemetry_coverage.jsonl"
+            if prior_cov.is_file():
+                _shutil.copyfile(prior_cov, coverage_dir / "telemetry_coverage.jsonl")
             resumed_from = args.resume_from
-            print(f"Resuming: loaded checkpoints from runs/{args.resume_from}/")
+            print(f"Resuming: loaded checkpoints + telemetry from runs/{args.resume_from}/")
         else:
             print(f"WARNING: --resume-from {args.resume_from}: no checkpoints.json found; full run.",
                   file=sys.stderr)
@@ -906,6 +919,21 @@ def main(argv: list[str]) -> int:
             key_re = re.compile(args.key_filter) if args.key_filter else None
             min_chunk_ms = int(args.min_chunk_hours * 3600 * 1000)
             result.files.append("telemetry/")
+
+            def gap_row(did: str, rk: str, completeness: str, pages: int,
+                        retries: int, cap_hits: int, err: str) -> dict[str, Any]:
+                return {"device_id": did, "key": rk,
+                        "window_start": utc_iso(telemetry_start_ms),
+                        "window_end": utc_iso(end_ms),
+                        "completeness": completeness, "pages": pages,
+                        "retries": retries, "cap_hits": cap_hits, "error": err}
+
+            # Design contract (regression: run 20260921_115525 died with
+            # "realloc of size 2281701376 failed" — one device accumulated
+            # 2.16M rows in memory before any write):
+            #   * rows are persisted PER KEY (memory bounded by one key),
+            #   * a checkpoint is written only AFTER its data is on disk,
+            #   * key/device failures become gaps — never step aborts.
             for d in eligible:
                 did = d["device_id"]
                 keys = keys_by_device.get(did, [])
@@ -913,60 +941,85 @@ def main(argv: list[str]) -> int:
                     keys = [k for k in keys if key_re.search(k)]
                 if args.max_keys_per_device:
                     keys = keys[: args.max_keys_per_device]
-                dev_rows: list[dict[str, Any]] = []
-                for raw_key in keys:
-                    if checkpoints.is_done(did, raw_key, telemetry_start_ms, end_ms):
-                        continue
-                    safe = quote(raw_key, safe="")
+                pending = [k for k in keys
+                           if not checkpoints.is_done(did, k, telemetry_start_ms, end_ms)]
+                if not pending:
+                    continue
+                dev_dir = tele_dir / did
+                device_rows = 0
+                try:
+                    for raw_key in pending:
+                        safe = quote(raw_key, safe="") or "_blank_"
 
-                    def page_fn(cursor_ms: int, end: int, limit: int,
-                                _did: str = did, _safe: str = safe,
-                                _rk: str = raw_key) -> tuple[list[dict[str, Any]], int]:
-                        url = (
-                            f"{client.host}/api/plugins/telemetry/DEVICE/{_did}/values/timeseries"
-                            f"?keys={_safe}&startTs={cursor_ms}&endTs={end}"
-                            f"&limit={limit}&orderBy=ASC&agg=NONE&useStrictDataTypes=false"
-                        )
-                        resp, retries = http_get(client.session, url, client.headers, 45, retry_policy)
-                        data = resp.json()
-                        batch = data.get(_rk) or [] if isinstance(data, dict) else []
-                        return batch, retries
+                        def page_fn(cursor_ms: int, end: int, limit: int,
+                                    _did: str = did, _safe: str = safe,
+                                    _rk: str = raw_key) -> tuple[list[dict[str, Any]], int]:
+                            url = (
+                                f"{client.host}/api/plugins/telemetry/DEVICE/{_did}/values/timeseries"
+                                f"?keys={_safe}&startTs={cursor_ms}&endTs={end}"
+                                f"&limit={limit}&orderBy=ASC&agg=NONE&useStrictDataTypes=false"
+                            )
+                            resp, retries = http_get(client.session, url, client.headers, 45, retry_policy)
+                            data = resp.json()
+                            batch = data.get(_rk) or [] if isinstance(data, dict) else []
+                            return batch, retries
 
-                    outcome = resolve_window(page_fn, telemetry_start_ms, end_ms,
-                                             args.limit, min_chunk_ms)
-                    cap_hits_total += outcome.cap_hits
-                    ledger.add(CoverageRecord(
-                        run_id=run_id, device_id=did, key=raw_key, endpoint="timeseries",
-                        requested_start_ms=telemetry_start_ms, requested_end_ms=end_ms,
-                        chunk_start_ms=telemetry_start_ms, chunk_end_ms=end_ms,
-                        pages=outcome.pages,
-                        status_code=200 if outcome.completeness in ("complete", "empty_verified") else None,
-                        retries=outcome.retries, rows=len(outcome.points),
-                        oldest_ts=outcome.oldest_ts, newest_ts=outcome.newest_ts,
-                        completeness=outcome.completeness, error=outcome.error,
-                    ))
-                    if outcome.completeness in ("complete", "empty_verified"):
-                        checkpoints.mark_done(did, raw_key, telemetry_start_ms, end_ms)
-                    else:
-                        gaps.append({"device_id": did, "key": raw_key,
-                                     "window_start": utc_iso(telemetry_start_ms),
-                                     "window_end": utc_iso(end_ms),
-                                     "completeness": outcome.completeness,
-                                     "pages": outcome.pages, "retries": outcome.retries,
-                                     "cap_hits": outcome.cap_hits, "error": outcome.error})
-                    canonical = alias_map.get(raw_key) or alias_map.get(raw_key.lower()) or raw_key
-                    for e in outcome.points:
-                        ts = parse_time_to_ms(e.get("ts"))
-                        dev_rows.append({
-                            "device_id": did, "raw_key": raw_key, "key": canonical,
-                            "ts": e.get("ts", ""), "ts_iso": utc_iso(ts) if ts else "",
-                            "value": flat(e.get("value")),
-                        })
-                    time.sleep(args.request_delay)
-                if dev_rows:
-                    pd.DataFrame(dev_rows).to_parquet(tele_dir / f"telemetry_{did}.parquet", index=False)
-                    result.files.append(f"telemetry/telemetry_{did}.parquet")
-                    result.rows += len(dev_rows)
+                        # Per-key isolation: a bad key records a gap and the
+                        # device (and fleet) keeps pulling.
+                        try:
+                            outcome = resolve_window(page_fn, telemetry_start_ms, end_ms,
+                                                     args.limit, min_chunk_ms)
+                        except Exception as exc:  # noqa: BLE001 - keep pulling
+                            gaps.append(gap_row(did, raw_key, "failed", 0, 0, 0,
+                                                f"{type(exc).__name__}: {str(exc)[:200]}"))
+                            result.errors.append(f"key {type(exc).__name__}: {did}/{raw_key}")
+                            continue
+
+                        cap_hits_total += outcome.cap_hits
+                        ledger.add(CoverageRecord(
+                            run_id=run_id, device_id=did, key=raw_key, endpoint="timeseries",
+                            requested_start_ms=telemetry_start_ms, requested_end_ms=end_ms,
+                            chunk_start_ms=telemetry_start_ms, chunk_end_ms=end_ms,
+                            pages=outcome.pages,
+                            status_code=200 if outcome.completeness in ("complete", "empty_verified") else None,
+                            retries=outcome.retries, rows=len(outcome.points),
+                            oldest_ts=outcome.oldest_ts, newest_ts=outcome.newest_ts,
+                            completeness=outcome.completeness, error=outcome.error,
+                        ))
+                        if outcome.completeness in ("complete", "empty_verified"):
+                            # Persist BEFORE checkpointing: a done-mark must
+                            # always point at data that exists on disk.
+                            if outcome.points:
+                                canonical = (alias_map.get(raw_key)
+                                             or alias_map.get(raw_key.lower()) or raw_key)
+                                rows = []
+                                for e in outcome.points:
+                                    ts = parse_time_to_ms(e.get("ts"))
+                                    rows.append({
+                                        "device_id": did, "raw_key": raw_key, "key": canonical,
+                                        "ts": e.get("ts", ""), "ts_iso": utc_iso(ts) if ts else "",
+                                        "value": flat(e.get("value")),
+                                    })
+                                dev_dir.mkdir(parents=True, exist_ok=True)
+                                target = dev_dir / f"{safe}.parquet"
+                                tmp = dev_dir / f".{safe}.parquet.tmp"
+                                pd.DataFrame(rows).to_parquet(tmp, index=False)
+                                os.replace(tmp, target)  # atomic per-key file
+                                device_rows += len(rows)
+                            checkpoints.mark_done(did, raw_key, telemetry_start_ms, end_ms)
+                        else:
+                            gaps.append(gap_row(did, raw_key, outcome.completeness,
+                                                outcome.pages, outcome.retries,
+                                                outcome.cap_hits, outcome.error))
+                        time.sleep(args.request_delay)
+                except Exception as exc:  # noqa: BLE001 - keep the fleet pulling
+                    gaps.append(gap_row(did, "*device*", "failed", 0, 0, 0,
+                                        f"device aborted: {type(exc).__name__}: {str(exc)[:200]}"))
+                    result.errors.append(f"device {type(exc).__name__}: {did}")
+                    continue
+                if device_rows:
+                    result.rows += device_rows
+                    result.files.append(f"telemetry/{did}/")
 
         run_step("telemetry", step_telemetry)
 

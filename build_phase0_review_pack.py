@@ -47,7 +47,7 @@ FAULT_CLASS_RE = re.compile(r"fault_class\s*:\s*([A-Za-z]+)", re.I)
 FAULT_SCORE_RE = re.compile(r"fault_score\s*:\s*([0-9]+(?:\.[0-9]+)?)", re.I)
 REASONS_RE = re.compile(r"reasons\s*:\s*(.+)$", re.I | re.S)
 
-DEFAULT_JSONL = Path("ml_training_v11.jsonl")
+DEFAULT_JSONL = Path("jsonl") / "ml_training_v11.jsonl"
 DEFAULT_SNAPSHOTS_DIR = Path("current_state_snapshots")
 DEFAULT_OUT = Path("training_data") / "phase0_review_pack.csv"
 
@@ -59,7 +59,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                    help="Fresh daily grid CSV (device-day rows with ts_severity). "
                         "When given, it replaces --jsonl as the pack source.")
     p.add_argument("--timeseries", default="",
-                   help="ml_training_timeseries.jsonl for a grid-vs-JSONL severity cross-check.")
+                   help="jsonl/ml_training_timeseries.jsonl for a grid-vs-JSONL severity cross-check.")
     p.add_argument("--severity", default="CRITICAL",
                    help="Grid/JSONL severity value to pack (default: CRITICAL).")
     p.add_argument("--sample-n", type=int, default=60,

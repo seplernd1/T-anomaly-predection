@@ -41,10 +41,14 @@ current_state_snapshots/*.json
 hs_err_pid*.log
 
 # Large generated harvest outputs (re-buildable; too big for git)
-ts_daily_snapshots_*.csv
+# generated harvest outputs live in dedicated folders (organized 2026-09-24)
+excel/
+csv/
+json/
+jsonl/
+
+# legacy root-level stragglers (locked files that could not be moved)
 ml_training_*.jsonl
-tb_audit_*.xlsx
-ts_summary_*.xlsx
-dashboard_data*.json
+*.ipynb.pre-organize.bak
 
 

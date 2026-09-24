@@ -251,3 +251,71 @@ def test_registry_pagination_walks_has_next():
 
     rows = pull_devices(C(), page_size=3, delay=0)
     assert [r["device_id"] for r in rows] == ["d0", "d1", "d2", "d3"]
+
+
+# ---------------------------------------------------------------------------
+# Global request pacing (429-storm prevention; regression: run 20260921_115525)
+# ---------------------------------------------------------------------------
+def test_pacing_spaces_http_attempts():
+    import time as _time
+    from tb_resilient import configure_pacing, http_get
+
+    class _OK:
+        status_code = 200
+        text = ""
+        headers: dict = {}
+
+    class _Sess:
+        def get(self, *a, **k):
+            return _OK()
+
+    try:
+        configure_pacing(0.15)
+        t0 = _time.monotonic()
+        http_get(_Sess(), "http://x/", {}, 5)
+        http_get(_Sess(), "http://x/", {}, 5)
+        elapsed = _time.monotonic() - t0
+    finally:
+        configure_pacing(0)  # never leak pacing into other tests
+    assert elapsed >= 0.14, f"second attempt was not paced (elapsed={elapsed:.3f}s)"
+
+
+def test_pacing_disabled_by_default_no_sleep():
+    import time as _time
+    from tb_resilient import configure_pacing, http_get
+
+    configure_pacing(0)
+
+    class _OK:
+        status_code = 200
+        text = ""
+        headers: dict = {}
+
+    class _Sess:
+        def get(self, *a, **k):
+            return _OK()
+
+    t0 = _time.monotonic()
+    for _ in range(5):
+        http_get(_Sess(), "http://x/", {}, 5)
+    assert _time.monotonic() - t0 < 0.14, "pacing active although disabled"
+
+
+def test_coverage_ledger_identity_dedup_on_reload(tmp_path):
+    """A resumed run's fresh record must replace the stale one (no double
+    counts, no stale 'failed' verdict surviving a successful re-fetch)."""
+    from tb_resilient import CoverageLedger, CoverageRecord
+
+    path = tmp_path / "cov.jsonl"
+    led = CoverageLedger("r1", path)
+    common = dict(run_id="r1", device_id="d1", key="k1", endpoint="timeseries",
+                  requested_start_ms=1000, requested_end_ms=2000,
+                  chunk_start_ms=1000, chunk_end_ms=2000)
+    led.add(CoverageRecord(**common, completeness="failed", error="429"))
+    led.add(CoverageRecord(**common, completeness="complete", error=""))
+    assert len(led.records) == 1
+    # reload from disk (same as --resume-from copying the coverage file)
+    reloaded = CoverageLedger("r1", path)
+    assert len(reloaded.records) == 1
+    assert reloaded.records[0].completeness == "complete"
+    assert not reloaded.incomplete()

@@ -75,7 +75,7 @@ def send_summary(success):
             emsg["To"] = "animesh.choudhury@seple.in"
             
             # Attach the latest excel report
-            list_of_files = glob.glob("tb_audit_*.xlsx")
+            list_of_files = glob.glob("excel/tb_audit_*.xlsx")
             if list_of_files:
                 latest_file = max(list_of_files, key=os.path.getctime)
                 with open(latest_file, 'rb') as f:

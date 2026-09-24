@@ -100,6 +100,36 @@ def _backoff(policy: RetryPolicy, attempt: int) -> float:
     return max(0.0, delay)
 
 
+# ─── global request pacing ─────────────────────────────────────────────────────
+# Shared minimum interval between HTTP attempts across every http_get caller.
+# Disabled (0.0) by default; pull_all_data enables it from --request-delay so
+# page loops and step bursts cannot storm the tenant into HTTP 429 responses.
+
+_pacing_interval_s: float = 0.0
+_pacing_last_at: float = 0.0
+
+
+def configure_pacing(min_interval_s: float) -> None:
+    """Set a global minimum spacing in seconds between HTTP attempts (0 = off)."""
+    global _pacing_interval_s, _pacing_last_at
+    try:
+        _pacing_interval_s = max(0.0, float(min_interval_s))
+    except (TypeError, ValueError):
+        _pacing_interval_s = 0.0
+    _pacing_last_at = 0.0
+
+
+def _pace() -> None:
+    global _pacing_last_at
+    if _pacing_interval_s <= 0:
+        return
+    now = time.monotonic()
+    wait = _pacing_last_at + _pacing_interval_s - now
+    if wait > 0:
+        time.sleep(wait)
+    _pacing_last_at = time.monotonic()
+
+
 def http_get(
     session: Any,
     url: str,
@@ -118,6 +148,7 @@ def http_get(
     last_status: int | None = None
     last_body = ""
     for attempt in range(1, policy.max_attempts + 1):
+        _pace()  # global pacing: no request bursts (429 prevention)
         try:
             resp = session.get(url, headers=headers or {}, timeout=timeout_s)
         except (requests.Timeout, requests.ConnectionError) as exc:
@@ -373,21 +404,33 @@ class CoverageLedger:
     def __init__(self, run_id: str, path: Path):
         self.run_id = run_id
         self.path = Path(path)
-        self.records: list[CoverageRecord] = []
+        # Identity-keyed (device+key+window): a resumed run's fresh record
+        # replaces the stale one, so re-fetched keys cannot double-count or
+        # leave a stale "failed" verdict blocking a now-complete window.
+        self._by: dict[tuple, CoverageRecord] = {}
         if self.path.is_file():
             with self.path.open(encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if line:
                         try:
-                            self.records.append(CoverageRecord(**json.loads(line)))
+                            rec = CoverageRecord(**json.loads(line))
                         except Exception:
                             continue
+                        self._by[self._ident(rec)] = rec
+
+    @staticmethod
+    def _ident(r: CoverageRecord) -> tuple:
+        return (r.device_id, r.key, r.requested_start_ms, r.requested_end_ms)
+
+    @property
+    def records(self) -> list[CoverageRecord]:
+        return list(self._by.values())
 
     def add(self, record: CoverageRecord) -> None:
         if not record.retrieved_at:
             record.retrieved_at = datetime.now(timezone.utc).isoformat()
-        self.records.append(record)
+        self._by[self._ident(record)] = record
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(asdict(record), ensure_ascii=True) + "\n")
