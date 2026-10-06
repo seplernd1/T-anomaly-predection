@@ -22,24 +22,34 @@ history, attributes, and alarm *history up to* the March boundary.
 
 All checks were read-only API queries against the production tenant.
 
-### Finding 1 — alarm history ends 2026-03-30, tenant-wide
+### Finding 1 — alarm history ends 2026-03-30 on HESTIA-profile devices only (corrected 2026-10-06)
 
 - Alarm query for a known-active device (`BOB-AIRPORT`, type `HESTIA`):
   - 2025-09-21 → 2026-03-30: **8,944 alarms** (CAMERA TAMPER/DISCONNECT, IAS, DVR/NVR OFF, POWER OFF, BATTERY LOW).
   - 2026-04-01 → 2026-07-01: `totalElements = 0`.
   - 2026-07-01 → 2026-09-21: `totalElements = 0`.
 - The same device kept posting telemetry after 2026-03-30 (it was alive).
-- Two other devices show identical behavior (history stops at the same boundary).
-- The oldest returned alarm sits at exactly `today − 365 days`, which also indicates a
+- Two other HESTIA devices show identical behavior (history stops at the same boundary).
+- **Correction:** this freeze is NOT tenant-wide. Live `BOI Device Profile` devices
+  (`BOI-MALDATOWN`, `BOI-COOCHBEHAR`, verified 2026-10-06) hold thousands of alarms
+  each, including `ACTIVE_UNACK` alarms from August 2026 and closed `POWER OFF`
+  windows with `clearTs`. A full pull on 2026-10-05 collected **65,641 alarm rows
+  across 129 devices with 0 errors**, newest alarm 2026-09-29 — alarm generation
+  is demonstrably alive on the BOI profile.
+- The oldest returned HESTIA alarm sits at exactly `today − 365 days`, which also indicates a
   365-day alarm retention window is in effect.
 
 **Interpretation:** alarms stopped being *generated* (or delivered to the alarm subsystem)
-around 2026-03-30 — this is not a query or permission problem on our side. Possible causes
+for the HESTIA profile around 2026-03-30 — this is not a query or permission problem on our side. Possible causes
 on the platform side: a rule-chain change, a device-profile alarm-rule migration, an
 upgrade on ~2026-03-30, or an alarm-retention/cleanup job over-running.
+(Note: `BOB-AIRPORT` itself was later physically pulled out, so its silence after
+March is now expected — but the March boundary predates the removal and matches
+two sibling HESTIA devices.)
 
 **Question for Seple:** did anything change in the rule chains, device profiles, or
-platform version around 2026-03-30? Can alarm generation be restored/re-enabled?
+platform version around 2026-03-30 for the HESTIA profile? Can alarm generation be restored/re-enabled there?
+The BOI profile needs no alarm fix — it is our verified-label source going forward.
 
 ### Finding 2 — device events return zero rows for every type and window
 

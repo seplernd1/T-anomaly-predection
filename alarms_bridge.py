@@ -49,7 +49,8 @@ import pandas as pd
 ALARM_EVENT_TYPE = "ALARM"
 
 #: Camera-channel alarms describe one video channel, not device availability.
-CAMERA_CHANNEL_RE = re.compile(r"^CAMERA\s+(TAMPER|DISCONNECT)", re.I)
+#: Covers both plain ("CAMERA TAMPER CH 9") and bank-prefixed ("BOI- CAMERA TAMPER CH 2") forms.
+CAMERA_CHANNEL_RE = re.compile(r"^(BOI-\s*)?CAMERA\s+(TAMPER|DISCONNECT)", re.I)
 
 BRIDGE_MARKER = "alarm_csv_bridge_v1"
 

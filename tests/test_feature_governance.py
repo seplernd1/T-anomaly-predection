@@ -66,8 +66,10 @@ def test_partial_windows_excluded_from_usable(tmp_path):
 # 13/14: sensitive + rule-derived fields blocked, fail-closed
 # ---------------------------------------------------------------------------
 def test_denylist_blocks_sensitive_and_rule_derived():
+    # NOTE: "humidity" is used as the unreviewed-key probe — real allowlisted keys
+    # (e.g. "temperature", signed off 2026-10-06) must NOT appear here.
     allowed, excluded = classify_keys(
-        ["temperature", "imei", "fault_score", "ts_severity", "heartbeat", "latitude"],
+        ["humidity", "imei", "fault_score", "ts_severity", "heartbeat", "latitude"],
         POLICY,
     )
     assert allowed == []
@@ -75,7 +77,7 @@ def test_denylist_blocks_sensitive_and_rule_derived():
     assert reasons["imei"].startswith("denylist:")
     assert reasons["fault_score"].startswith("denylist:")
     assert reasons["heartbeat"].startswith("denylist:")
-    assert reasons["temperature"] == "unreviewed:not_in_allowlist"
+    assert reasons["humidity"] == "unreviewed:not_in_allowlist"
 
 
 def test_output_guard_raises():

@@ -8,7 +8,16 @@
     "secrets, payloads, statuses, scores, or label proxies."
   ],
   "default_allow_unknown": false,
-  "allowlist": [],
+  "allowlist": [
+    "temperature", "disk", "cpu", "memory",
+    "net_sent_mb", "net_recv_mb",
+    "battery_voltage", "system_current", "ac_voltage", "frequency",
+    "usage_daily", "usage_last_7_days", "usage_last_15_days",
+    "Total_Data_Usage", "rpi_usage", "cavlidata_ontime", "errorCount",
+    "cctvUptime", "basUptime", "gatewayUptime", "uptimeTotal", "BAS_Uptime_Minutes",
+    "iasLastHour", "cctvLastHour", "basLastHour", "fasLastHour",
+    "gatewayLastHour", "accessControlLastHour", "timeLockLastHour"
+  ],
   "denylist_patterns": [
     ["(^|_)(device|tenant|customer|branch|org|gateway|node|site)_?id$", "identifier"],
     ["(^|_)(device|branch|zone|customer|nbg|zo|ro|ho|co)_?name$", "identifier"],

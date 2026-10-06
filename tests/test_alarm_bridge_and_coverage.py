@@ -110,6 +110,8 @@ def test_camera_channel_alarm_is_weak_and_never_closes_outages():
         [
             _alarm_row(alarm_type="CAMERA TAMPER CH 9", status="CLEARED_UNACK"),
             _alarm_row(alarm_type="CAMERA DISCONNECT CH 2", status="CLEARED_UNACK"),
+            _alarm_row(alarm_type="BOI- CAMERA TAMPER CH 2", status="CLEARED_UNACK"),
+            _alarm_row(alarm_type="BOI- CAMERA DISCONNECT CH 14", status="CLEARED_UNACK"),
         ]
     )
     evidence = _classify(alarms_frame_to_event_rows(frame))

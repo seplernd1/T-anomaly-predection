@@ -1163,7 +1163,8 @@ def _payload_method(payload: dict[str, Any]) -> str:
 
 
 # Camera-channel alarms are per-video-channel, not device-level outages.
-CAMERA_CHANNEL_RE = re.compile(r"^CAMERA\s+(TAMPER|DISCONNECT)", re.I)
+# Covers plain ("CAMERA TAMPER CH 9") and bank-prefixed ("BOI- CAMERA TAMPER CH 2") forms.
+CAMERA_CHANNEL_RE = re.compile(r"^(BOI-\s*)?CAMERA\s+(TAMPER|DISCONNECT)", re.I)
 
 
 def classify_event_evidence(row: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any] | None:

@@ -111,11 +111,12 @@ def load_usable_keys(run_dir: Path) -> tuple[set[tuple[str, str]], list[dict[str
     ledger = CoverageLedger("anomaly-build", run_dir / "coverage" / "telemetry_coverage.jsonl")
     usable: set[tuple[str, str]] = set()
     excluded: list[dict[str, Any]] = []
-    stats = {"complete": 0, "empty": 0, "partial": 0, "failed": 0}
+    stats = {"complete": 0, "empty": 0, "partial": 0, "failed": 0, "rows_usable": 0}
     for r in ledger.records:
         pair = (r.device_id, r.key)
         if r.completeness == "complete":
             usable.add(pair)
+            stats["rows_usable"] += int(getattr(r, "rows", 0) or 0)
             stats["complete"] += 1
         elif r.completeness == "empty_verified":
             stats["empty"] += 1
@@ -126,21 +127,82 @@ def load_usable_keys(run_dir: Path) -> tuple[set[tuple[str, str]], list[dict[str
     return usable, excluded, stats
 
 
-def load_telemetry(run_dir: Path) -> pd.DataFrame:
-    frames = []
-    for pq in sorted((run_dir / "telemetry").glob("telemetry_*.parquet")):
-        try:
-            frames.append(pd.read_parquet(pq))
-        except Exception as exc:
-            print(f"WARNING: unreadable {pq.name}: {exc}", file=sys.stderr)
-    if not frames:
-        return pd.DataFrame()
-    df = pd.concat(frames, ignore_index=True)
+def normalize_telemetry(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
     df["ts_ms"] = pd.to_numeric(df["ts"], errors="coerce")
     df = df.dropna(subset=["ts_ms"])
     df["ts_ms"] = df["ts_ms"].astype("int64")
     df["value_num"] = pd.to_numeric(df["value"], errors="coerce")
     return df
+
+
+def iter_device_telemetry(run_dir: Path):
+    """Yield (device_id, frame) one device at a time — peak memory is one device.
+
+    Reads the per-key layout (telemetry/<device_id>/<key>.parquet, post-OOM fix)
+    plus the legacy telemetry/telemetry_<device_id>.parquet layout. Skips temp files.
+    """
+    tele = run_dir / "telemetry"
+    if not tele.is_dir():
+        return
+    for d_dir in sorted(p for p in tele.iterdir() if p.is_dir()):
+        frames = []
+        for pq in sorted(d_dir.glob("*.parquet")):
+            if pq.name.startswith("."):
+                continue
+            try:
+                frames.append(pd.read_parquet(pq))
+            except Exception as exc:
+                print(f"WARNING: unreadable {pq}: {exc}", file=sys.stderr)
+        if frames:
+            yield d_dir.name, pd.concat(frames, ignore_index=True)
+    legacy = [pq for pq in sorted(tele.glob("telemetry_*.parquet")) if not pq.name.startswith(".")]
+    if legacy:
+        frames = []
+        for pq in legacy:
+            try:
+                frames.append(pd.read_parquet(pq))
+            except Exception as exc:
+                print(f"WARNING: unreadable {pq.name}: {exc}", file=sys.stderr)
+        if frames:
+            yield "__legacy__", pd.concat(frames, ignore_index=True)
+
+
+def iter_device_keys(run_dir: Path):
+    """Yield (device_id, key) using column-only reads — cheap enough for --plan-only."""
+    tele = run_dir / "telemetry"
+    if not tele.is_dir():
+        return
+    for d_dir in sorted(p for p in tele.iterdir() if p.is_dir()):
+        for pq in sorted(d_dir.glob("*.parquet")):
+            if pq.name.startswith("."):
+                continue
+            try:
+                keys = pd.read_parquet(pq, columns=["key"])["key"].unique().tolist()
+            except Exception:
+                continue
+            for k in keys:
+                yield d_dir.name, str(k)
+    for pq in sorted(tele.glob("telemetry_*.parquet")):
+        if pq.name.startswith("."):
+            continue
+        try:
+            keys = pd.read_parquet(pq, columns=["key"])["key"].unique().tolist()
+        except Exception:
+            continue
+        for k in keys:
+            yield "", str(k)
+
+
+def load_telemetry(run_dir: Path) -> pd.DataFrame:
+    """Legacy bulk loader (kept for API compat). Prefer the streaming path in main:
+    peak memory is the whole fleet — do not use on full 365-day runs."""
+    frames = []
+    for _, dev_df in iter_device_telemetry(run_dir):
+        frames.append(dev_df)
+    if not frames:
+        return pd.DataFrame()
+    return normalize_telemetry(pd.concat(frames, ignore_index=True))
 
 
 def load_groups(run_dir: Path) -> dict[str, str]:
@@ -313,22 +375,19 @@ def main(argv: list[str] | None = None) -> int:
     windows = tuple(int(w) for w in args.windows_hours.split(",") if w.strip())
 
     usable, excluded_windows, cov_stats = load_usable_keys(run_dir)
-    df = load_telemetry(run_dir)
-    df = df[[ (r["device_id"], r["key"]) in usable for _, r in df.iterrows()]] if not df.empty else df
-    present_keys = sorted(df["key"].unique().tolist()) if not df.empty else []
+    # Cheap key discovery (column-only reads): never loads full telemetry here.
+    present_keys = sorted({k for _, k in iter_device_keys(run_dir)})
     allowed, excluded_keys = classify_keys(present_keys, policy)
+    allowed_set = set(allowed)
 
     if args.plan_only:
         print(f"run            : {run_dir}")
         print(f"coverage       : {cov_stats}")
         print(f"present keys   : {len(present_keys)} -> allowed {len(allowed)}, excluded {len(excluded_keys)}")
-        print(f"usable rows    : {len(df)}")
+        print(f"usable rows    : ~{cov_stats.get('rows_usable', 0)} (ledger estimate, complete windows)")
         print(f"outputs        : {out_dir}/")
         return 0
 
-    if df.empty:
-        print("ERROR: no usable telemetry (all windows partial/failed?)", file=sys.stderr)
-        return 4
     if not allowed:
         print("ERROR: allowlist empty/blocked every key — no features permitted. "
               "Lead must review keys into feature_policy.json allowlist.", file=sys.stderr)
@@ -337,8 +396,29 @@ def main(argv: list[str] | None = None) -> int:
              "coverage": cov_stats}, indent=2).encode("utf-8"))
         return 4
 
-    frame, dictionary = build_features(df, allowed, args.anchors_hours, windows,
-                                       args.fill_cap_hours, args.min_history_hours)
+    # Streaming feature build: one device in memory at a time.
+    frames: list[pd.DataFrame] = []
+    dictionary: list[dict[str, str]] = []
+    for _, dev_df in iter_device_telemetry(run_dir):
+        dev_df = normalize_telemetry(dev_df)
+        keep = [(d, k) in usable and k in allowed_set
+                for d, k in zip(dev_df["device_id"].astype(str), dev_df["key"].astype(str))]
+        dev_df = dev_df[pd.Series(keep, index=dev_df.index)]
+        del keep
+        if dev_df.empty:
+            continue
+        dev_frame, dev_dict = build_features(dev_df, allowed, args.anchors_hours, windows,
+                                             args.fill_cap_hours, args.min_history_hours)
+        del dev_df
+        if dev_frame.empty:
+            continue
+        frames.append(dev_frame)
+        dictionary.extend(dev_dict)
+    if not frames:
+        print("ERROR: no usable telemetry (all windows partial/failed?)", file=sys.stderr)
+        return 4
+    frame = pd.concat(frames, ignore_index=True)
+    del frames
     if frame.empty:
         print("ERROR: feature frame empty.", file=sys.stderr)
         return 4
