@@ -137,10 +137,12 @@ def test_chrono_splits_group_pure_and_ordered():
                      "f": float(i)})
     frame = pd.DataFrame(rows)
     out = assign_chrono_splits(frame, {}, purge_hours=1.0)
-    assert out.groupby("group_key")["split"].nunique().max() == 1
-    med = out.groupby("split")["anchor_ts"].median()
+    live = out[out["split"] != "purged"]  # purged rows keep their group but are excluded
+    assert set(live["split"]) == {"train", "validation", "test"}
+    assert live.groupby("group_key")["split"].nunique().max() == 1
+    med = live.groupby("split")["anchor_ts"].median()
     assert med["train"] < med["validation"] < med["test"]
-    assert set(out[out["group_key"].str.endswith("d1")]["split"]) == {"train"}
+    assert set(live[live["group_key"].str.endswith("d1")]["split"]) == {"train"}
 
 
 # ---------------------------------------------------------------------------

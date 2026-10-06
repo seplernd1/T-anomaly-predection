@@ -299,31 +299,52 @@ def build_features(
 def assign_chrono_splits(frame: pd.DataFrame, groups: dict[str, str],
                          fractions: tuple[float, float, float] = (0.7, 0.15, 0.15),
                          purge_hours: float = 192.0) -> pd.DataFrame:
-    """Chronological per-group splits with purge band. Groups never split."""
+    """Chronological per-group splits with purge band. Groups never split.
+
+    Cut positions are chosen to best match the target row fractions while keeping
+    every split non-empty (a single giant group can no longer eat validation).
+    Purge applies ONLY at the two split boundaries — never between same-split groups.
+    """
     frame = frame.copy()
     frame["group_key"] = ["customer:" + (groups.get(d) or f"device:{d}")
                           for d in frame["device_id"]]
     medians = frame.groupby("group_key")["anchor_ts"].median().sort_values()
     order = list(medians.index)
-    n = len(frame)
-    bounds = [int(n * fractions[0]), int(n * (fractions[0] + fractions[1]))]
-    cum, assignment, idx = 0, {}, 0
-    counts = frame.groupby("group_key").size().to_dict()
-    for g in order:
-        cum += counts[g]
-        assignment[g] = "train" if cum <= bounds[0] else ("validation" if cum <= bounds[1] else "test")
-        idx += 1
+    counts = [int((frame["group_key"] == g).sum()) for g in order]
+    total = sum(counts)
+    targets = [fractions[0] * total, fractions[1] * total, fractions[2] * total]
+    n = len(order)
+    best = None
+    for first in range(1, n - 1):
+        for second in range(first + 1, n):
+            sizes = [sum(counts[:first]), sum(counts[first:second]), sum(counts[second:])]
+            if min(sizes) == 0:
+                continue
+            dev = sum(abs(sizes[k] - targets[k]) for k in range(3))
+            if best is None or dev < best[0]:
+                best = (dev, first, second)
+    if best is None:  # fewer than 3 usable groups: chronological two-way split
+        first = max(1, n - 1)
+        best = (0.0, first, n)
+    _, first, second = best
+    assignment = {}
+    for pos, g in enumerate(order):
+        assignment[g] = "train" if pos < first else ("validation" if pos < second else "test")
     frame["split"] = [assignment[g] for g in frame["group_key"]]
-    # Purge: drop rows within purge_hours of a split boundary (by group median).
-    cut_vs = sorted(medians.tolist())
+    # Purge: rows within purge_hours of a split boundary go, tagged explicitly.
+    med_list = medians.tolist()
     purge = pd.Timedelta(hours=purge_hours)
     drop_idx = set()
-    for i in range(1, len(cut_vs)):
-        mid = cut_vs[i - 1] + (cut_vs[i] - cut_vs[i - 1]) / 2
+    for cut in (first, second):
+        if cut <= 0 or cut >= n:
+            continue
+        mid = med_list[cut - 1] + (med_list[cut] - med_list[cut - 1]) / 2
         lo, hi = mid - purge / 2, mid + purge / 2
         drop_idx.update(frame[(frame["anchor_ts"] >= lo) & (frame["anchor_ts"] <= hi)].index.tolist())
-    frame = frame.drop(index=list(drop_idx)).reset_index(drop=True)
-    return frame
+    if "censor_reason" not in frame.columns:
+        frame["censor_reason"] = pd.Series([None] * len(frame), index=frame.index, dtype=object)
+    frame.loc[sorted(drop_idx), "split"] = "purged"
+    return frame.reset_index(drop=True)
 
 
 def fit_scaler(frame: pd.DataFrame, feature_cols: list[str]) -> dict[str, dict[str, float]]:
