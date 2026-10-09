@@ -67,7 +67,7 @@ understand that history cannot be recovered.
 ## What we are requesting
 
 | # | Request | Why |
-|---|---------|-----|
+| --- | --------- | ----- |
 | 1 | Investigate/restore **alarm generation** (rule chains / device profiles) | Alarms with `clearTs` are our primary verified outage evidence |
 | 2 | Enable persistence for **LC_EVENT (lifecycle) events** with at least **400-day retention** | Independent disconnect/reconnect evidence for outage labels |
 | 3 | Confirm/extend **alarm retention** beyond 365 days (≥ 400 days preferred) | Training windows must predate any outage label horizon |
@@ -99,7 +99,3 @@ the model becomes trainable within one retention cycle.
   access-restricted storage.
 - We can validate restored alarm generation within minutes of the change using our
   existing probes (happy to run them together on a call).
-
-## Contacts
-
-ML/data engineering — via this repository's maintainers.

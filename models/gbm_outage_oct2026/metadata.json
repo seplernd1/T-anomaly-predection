@@ -1,0 +1,40 @@
+{
+  "created_at": "2026-10-09T11:02:26.863689+00:00",
+  "model_type": "HistGradientBoostingClassifier",
+  "label_semantics": "y=1 when a non-camera device-level ALARM EVENT (any type: DVR/NVR OFF, FIRE ALARM ACTIVATE, BATTERY REVERSE, INTRUSION, TIME LOCK, ...) starts within 24h of the anchor. NOT a verified power/DVR outage label; threshold metrics describe alarm-event alerting, not outage prediction.",
+  "training_samples": 37892,
+  "positive_samples": 5115,
+  "negative_samples": 32777,
+  "positive_prevalence": 0.135,
+  "unique_devices": 123,
+  "num_features": 503,
+  "features_path": "C:\\workspace\\Data_scrapping_thgingsboard_ml-intern\\training_data\\anomaly_20261005_041300_v2\\anomaly_features.parquet",
+  "labels_path": "C:\\workspace\\Data_scrapping_thgingsboard_ml-intern\\training_data\\supervised_outage_oct2026.parquet",
+  "hyperparameters": {
+    "max_iter": 300,
+    "learning_rate": 0.06,
+    "max_leaf_nodes": 63,
+    "min_samples_leaf": 50,
+    "l2_regularization": 1.0,
+    "class_weight": "balanced",
+    "random_state": 7
+  },
+  "operating_thresholds": {
+    "max_recall": {
+      "threshold": 0.2,
+      "description": "83% recall, 25% precision (~46 alerts/day)"
+    },
+    "recall_first": {
+      "threshold": 0.4,
+      "description": "72% recall, 29% precision (~35 alerts/day) [RECOMMENDED]"
+    },
+    "balanced": {
+      "threshold": 0.5,
+      "description": "67% recall, 30% precision (~31 alerts/day)"
+    },
+    "high_precision": {
+      "threshold": 0.65,
+      "description": "58% recall, 31% precision (~26 alerts/day)"
+    }
+  }
+}

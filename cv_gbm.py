@@ -82,6 +82,8 @@ def main():
     ap.add_argument('--features', default=str(FEATS))
     ap.add_argument('--labels', default=str(LABELS))
     ap.add_argument('--out', default=str(OUT))
+    ap.add_argument('--era-end', default='2026-04-30',
+                    help="End date for the evaluated era (default: 2026-04-30, use 'none' or 'full' to disable).")
     a = ap.parse_args()
     feats_path, labels_path, out = Path(a.features), Path(a.labels), Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -92,7 +94,11 @@ def main():
     m = fr.merge(lb[['device_id', 'anchor_ts', 'y_outage_24h', 'label_status']],
                  on=['device_id', 'anchor_ts'], how='inner')
     m = m[m['label_status'].isin(['measured', 'measured_negative'])]
-    m = m[m['anchor_ts'] <= ERA_END].reset_index(drop=True)
+    if a.era_end and a.era_end.lower() not in ('none', 'full', 'all'):
+        era_end_ts = pd.Timestamp(a.era_end, tz='UTC')
+        m = m[m['anchor_ts'] <= era_end_ts].reset_index(drop=True)
+    else:
+        m = m.reset_index(drop=True)
     m['y'] = (m['y_outage_24h'] == 1).astype(int)
     feat = [c for c in m.columns if c not in META]
     nuniq = m[feat].nunique(dropna=True)
