@@ -225,8 +225,20 @@ def build_features(
     windows_hours: tuple[int, ...] = (1, 6, 24, 168),
     fill_cap_hours: float = 6.0,
     min_history_hours: float = 12.0,
+    baseline_days: float = 28.0,
+    recent_hours: float = 24.0,
+    streak_keys: int = 10,
+    min_base_points: int = 10,
 ) -> tuple[pd.DataFrame, list[dict[str, str]]]:
-    """Point-in-time rows: anchor T uses only records with ts <= T."""
+    """Point-in-time rows: anchor T uses only records with ts <= T.
+
+    Per-key rolling-baseline additions (deviation-from-own-norm):
+      {key}__z{recent}h_vs_{baseline}d  z-score of the trailing recent-window
+          mean against the device's own trailing baseline that ENDS before the
+          recent window starts (no self-comparison, strictly past data).
+      {key}__gap_max_{streak}h         longest inter-sample gap (hours) inside
+          the trailing streak window (top-N keys by volume only).
+    """
     dictionary: list[dict[str, str]] = []
     rows: list[dict[str, Any]] = []
     if df.empty or not allowed:
@@ -243,6 +255,37 @@ def build_features(
         first_anchor = t0 + int(min_history_hours * 3600_000)
         anchor = first_anchor - (first_anchor % step)
         by_key = {k: kg.sort_values("ts_ms") for k, kg in g.groupby("key")}
+
+        # ── per-key rolling tables (vectorised once per device) ────────────
+        key_sizes = {k: len(kg) for k, kg in by_key.items()}
+        streak_set = set(sorted(key_sizes, key=lambda k: -key_sizes[k])[:max(0, streak_keys)])
+        key_tables: dict[str, dict[str, Any]] = {}
+        recent_ms = int(recent_hours * 3600_000)
+        for key in allowed:
+            kg = by_key.get(key)
+            if kg is None:
+                continue
+            kd = kg.dropna(subset=["value_num"])
+            if len(kd) < 2:
+                continue
+            ts = kd["ts_ms"].to_numpy(dtype=np.int64)
+            v = kd["value_num"].to_numpy(dtype=np.float64)
+            dt = pd.to_datetime(ts, unit="ms", utc=True)
+            ser = pd.Series(v, index=dt)
+            tbl: dict[str, Any] = {
+                "ts": ts,
+                "recent": ser.rolling(f"{recent_hours}h").mean().to_numpy(),
+                "base_mean": ser.rolling(f"{baseline_days}D").mean().to_numpy(),
+                "base_std": ser.rolling(f"{baseline_days}D").std().to_numpy(),
+                "base_cnt": ser.rolling(f"{baseline_days}D").count().to_numpy(),
+            }
+            if key in streak_set and len(ts) >= 2:
+                gaps_h = np.diff(ts) / 3600_000
+                gser = pd.Series(gaps_h, index=dt[1:])
+                tbl["gap_ts"] = ts[1:]
+                tbl["gap7"] = gser.rolling("7D").max().to_numpy()
+            key_tables[key] = tbl
+
         while anchor <= t1:
             row: dict[str, Any] = {"device_id": did, "anchor_ts": pd.Timestamp(anchor, unit="ms", tz="UTC")}
             max_src = 0
@@ -275,6 +318,33 @@ def build_features(
                             row[f"{base}__max_{w}h"] = float(wvals.max())
                 else:
                     row[f"{base}__count_1h"] = 0
+                # ── deviation-from-own-norm (strictly past baselines) ────────
+                tbl = key_tables.get(key)
+                if tbl is not None:
+                    ts_a = tbl["ts"]
+                    r = int(np.searchsorted(ts_a, anchor, side="right")) - 1
+                    j = int(np.searchsorted(ts_a, anchor - recent_ms, side="right")) - 1
+                    z = float("nan")
+                    if (r >= 0 and ts_a[r] >= anchor - recent_ms
+                            and j >= 0 and r > j
+                            and tbl["base_cnt"][j] >= min_base_points):
+                        bm = tbl["base_mean"][j]
+                        if not np.isnan(bm):
+                            sd = tbl["base_std"][j]
+                            sd = sd if (sd == sd) else 0.0  # NaN-guard
+                            # Constant baselines (sd=0) still yield a meaningful,
+                            # bounded z via a mean-scaled floor; clip extremes.
+                            sd_floor = 1e-3 * max(abs(bm), 1.0)
+                            z = float(np.clip(
+                                (tbl["recent"][r] - bm) / max(sd, sd_floor), -50.0, 50.0))
+                    row[f"{base}__z{int(recent_hours)}h_vs_{int(baseline_days)}d"] = z
+                    if "gap_ts" in tbl:
+                        gts = tbl["gap_ts"]
+                        gr = int(np.searchsorted(gts, anchor, side="right")) - 1
+                        g7 = float("nan")
+                        if gr >= 0 and gts[gr] >= anchor - 7 * 24 * 3600_000:
+                            g7 = float(tbl["gap7"][gr])
+                        row[f"{base}__gap_max_7d"] = g7
             if max_src:
                 assert max_src <= anchor, f"leakage: max_source {max_src} > anchor {anchor}"
                 row["max_source_ts"] = pd.Timestamp(max_src, unit="ms", tz="UTC")
@@ -288,8 +358,13 @@ def build_features(
         for col in frame.columns:
             if col in META_COLUMNS or col in ("device_id", "anchor_ts"):
                 continue
-            dictionary.append({"column": col, "dtype": str(frame[col].dtype),
-                               "description": "backward-window sensor feature (point-in-time safe)"})
+            if "__z" in col:
+                desc = "recent-window mean z-scored against the device's own prior trailing baseline (point-in-time safe)"
+            elif "__gap_max_7d" in col:
+                desc = "longest inter-sample gap (hours) in the trailing 7 days (point-in-time safe)"
+            else:
+                desc = "backward-window sensor feature (point-in-time safe)"
+            dictionary.append({"column": col, "dtype": str(frame[col].dtype), "description": desc})
     return frame, dictionary
 
 
@@ -379,6 +454,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--windows-hours", default="1,6,24,168")
     p.add_argument("--fill-cap-hours", type=float, default=6.0)
     p.add_argument("--min-history-hours", type=float, default=12.0)
+    p.add_argument("--baseline-days", type=float, default=28.0,
+                   help="Trailing per-device baseline window for deviation z-scores.")
+    p.add_argument("--recent-hours", type=float, default=24.0,
+                   help="Recent window mean that is z-scored against the baseline.")
+    p.add_argument("--streak-keys", type=int, default=10,
+                   help="Top-N keys (by volume) that also get gap-streak features.")
     p.add_argument("--purge-hours", type=float, default=192.0)
     p.add_argument("--plan-only", action="store_true")
     return p.parse_args(argv)
@@ -429,7 +510,10 @@ def main(argv: list[str] | None = None) -> int:
         if dev_df.empty:
             continue
         dev_frame, dev_dict = build_features(dev_df, allowed, args.anchors_hours, windows,
-                                             args.fill_cap_hours, args.min_history_hours)
+                                             args.fill_cap_hours, args.min_history_hours,
+                                             baseline_days=args.baseline_days,
+                                             recent_hours=args.recent_hours,
+                                             streak_keys=args.streak_keys)
         del dev_df
         if dev_frame.empty:
             continue

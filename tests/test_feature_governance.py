@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -108,6 +109,54 @@ def test_future_points_ignored_and_max_source_bounded():
     assert (frame["max_source_ts"] <= frame["anchor_ts"]).all()
     early = frame[frame["anchor_ts"] <= pd.Timestamp(20 * 3600_000, unit="ms", tz="UTC")]
     assert (early["temp__last"] != 999.0).all()
+
+
+# ---------------------------------------------------------------------------
+# 15b: per-device baseline z-features are point-in-time safe
+# ---------------------------------------------------------------------------
+def test_baseline_z_uses_only_past_data():
+    H = 3600_000
+    rows = []
+    # 26 days of a calm baseline (value 10), then a drift to 20 in the last day.
+    for d in range(0, 26):
+        for h in (0, 6, 12, 18):
+            rows.append({"device_id": "d", "key": "temp",
+                         "ts_ms": (d * 24 + h) * H, "value_num": 10.0})
+    for h in (0, 6, 12, 18):
+        rows.append({"device_id": "d", "key": "temp",
+                     "ts_ms": (26 * 24 + h) * H, "value_num": 20.0})
+    df = pd.DataFrame(rows)
+    frame, _ = build_features(df, ["temp"], anchors_hours=24, windows_hours=(24,),
+                              min_history_hours=12, baseline_days=21,
+                              recent_hours=24, streak_keys=0)
+    assert not frame.empty
+    zc = "temp__z24h_vs_21d"
+    assert zc in frame.columns
+    calm = frame[frame["anchor_ts"] <= pd.Timestamp(20 * 24 * H, unit="ms", tz="UTC")]
+    assert calm[zc].abs().max() < 0.5  # constant baseline -> z ~ 0
+    last = frame.iloc[-1]
+    assert last[zc] > 1.0  # drift to 20 against a ~10 baseline must stand out
+    # future spike must not change any earlier anchor's z
+    spike = {"device_id": "d", "key": "temp", "ts_ms": 40 * 24 * H, "value_num": 999.0}
+    frame2, _ = build_features(pd.DataFrame(rows + [spike]), ["temp"], anchors_hours=24,
+                               windows_hours=(24,), min_history_hours=12,
+                               baseline_days=21, recent_hours=24, streak_keys=0)
+    joined = frame.merge(frame2, on="anchor_ts", suffixes=("", "_2"))
+    assert np.allclose(joined[zc], joined[zc + "_2"], equal_nan=True)
+
+
+def test_gap_streak_feature_bounded_by_past():
+    H = 3600_000
+    rows = [{"device_id": "d", "key": "temp", "ts_ms": t, "value_num": 1.0}
+            for t in range(0, 5 * 24 * H, 6 * H)]
+    rows += [{"device_id": "d", "key": "temp", "ts_ms": t, "value_num": 1.0}
+             for t in range(6 * 24 * H, 9 * 24 * H, 6 * H)]  # 1-day hole before
+    frame, _ = build_features(pd.DataFrame(rows), ["temp"], anchors_hours=24,
+                              windows_hours=(24,), min_history_hours=12,
+                              baseline_days=7, recent_hours=24, streak_keys=1)
+    assert "temp__gap_max_7d" in frame.columns
+    tail = frame[frame["anchor_ts"] >= pd.Timestamp(6 * 24 * H, unit="ms", tz="UTC")]
+    assert (tail["temp__gap_max_7d"] >= 24.0).any()  # the 1-day hole is visible
 
 
 # ---------------------------------------------------------------------------
